@@ -1,0 +1,172 @@
+# Order processing pipeline — demonstrates typed errors, multi-level
+# catch blocks, and the static checker enforcing error handling.
+#
+# Three pipelines, each can throw different errors. The top-level
+# pipeline catches everything and returns a structured result.
+
+init {
+  api_keys {
+    gemini = env("GEMINI_API_KEY")
+  }
+
+  model fast = "gemini-3.5-flash" {
+    provider = "gemini"
+    temperature = 0.2
+    max_tokens = 256
+  }
+
+  model smart = "gemini-2.5-pro-preview-06-05" {
+    provider = "gemini"
+    temperature = 0.5
+    max_tokens = 1024
+  }
+}
+
+# ── error types ──────────────────────────────────────────────────────
+
+error InvalidOrder {
+  field: text
+}
+
+error OutOfStock {
+  product: text
+  available: num
+}
+
+error PaymentFailed {
+  reason: text
+  amount: num
+}
+
+# ── types ────────────────────────────────────────────────────────────
+
+type Order {
+  customer: text
+  product: text
+  quantity: num
+  total: num
+}
+
+type Receipt {
+  order: obj
+  confirmation: text
+  status: text
+}
+
+type Result {
+  receipt: any
+  error: any
+  error_type: any
+}
+
+# ── pipeline: validate ───────────────────────────────────────────────
+# parses and validates the raw order text. throws InvalidOrder on bad input.
+
+pipeline validate_order(raw: text) -> Order {
+  let info ~= extract(raw, fields: [customer, product, quantity, price]) with fast
+
+  if info.customer == "" {
+    throw InvalidOrder("missing customer name", field: "customer")
+  }
+  if info.quantity <= 0 {
+    throw InvalidOrder("quantity must be positive", field: "quantity")
+  }
+
+  let total = info.quantity * info.price
+  return @Order {
+    customer: info.customer,
+    product: info.product,
+    quantity: info.quantity,
+    total
+  }
+}
+
+# ── pipeline: check inventory ────────────────────────────────────────
+# checks stock levels. throws OutOfStock if we can't fulfill.
+
+pipeline check_inventory(order: Order) -> Order {
+  let res = fetch("https://api.example.com/inventory/${order.product}")
+
+  if res.status != 200 {
+    throw "inventory API unreachable"
+  }
+
+  let stock ~= extract(res.body, fields: [available]) with fast
+  if stock.available < order.quantity {
+    throw OutOfStock(
+      "${order.product} only has ${stock.available} units",
+      product: order.product,
+      available: stock.available
+    )
+  }
+
+  return order
+}
+
+# ── pipeline: charge ─────────────────────────────────────────────────
+# processes payment. throws PaymentFailed on decline.
+
+pipeline charge(order: Order) -> obj {
+  let res = fetch("https://api.example.com/charge", method: "POST", body: to_json(order))
+
+  if res.status != 200 {
+    let detail ~= extract(res.body, fields: [reason]) with fast
+    throw PaymentFailed(detail.reason, reason: detail.reason, amount: order.total)
+  }
+
+  let confirmation ~= extract(res.body, fields: [id, timestamp]) with fast
+  return confirmation
+}
+
+# ── pipeline: process (top-level) ────────────────────────────────────
+# ties it all together. each sub-pipeline can throw, and the checker
+# would warn if we didn't catch them here.
+
+pipeline process_order(raw: text) -> Result {
+  try {
+    let order = validate_order(raw)
+    let checked = check_inventory(order)
+    let confirmation = charge(checked)
+
+    let summary ~= compress(raw, max: 60) with fast
+
+    return @Result {
+      receipt: @Receipt {
+        order: checked,
+        confirmation: confirmation.id,
+        status: "completed"
+      },
+      error: null,
+      error_type: null
+    }
+  } catch InvalidOrder as err {
+    # bad input — tell the user what's wrong
+    return @Result {
+      receipt: null,
+      error: "Invalid order: ${err.message} (field: ${err.field})",
+      error_type: "validation"
+    }
+  } catch OutOfStock as err {
+    # can't fulfill — suggest alternatives
+    let suggestion ~= generate(err.product, format: [alternative, reason]) with smart
+    return @Result {
+      receipt: null,
+      error: "${err.message}. Try: ${suggestion.alternative}",
+      error_type: "inventory"
+    }
+  } catch PaymentFailed as err {
+    # payment declined — no model call needed, just report
+    return @Result {
+      receipt: null,
+      error: "Payment of ${err.amount} failed: ${err.reason}",
+      error_type: "payment"
+    }
+  } catch err {
+    # anything else (API unreachable, etc.)
+    return @Result {
+      receipt: null,
+      error: err.message,
+      error_type: "unknown"
+    }
+  }
+}

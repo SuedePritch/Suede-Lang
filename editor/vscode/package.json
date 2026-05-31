@@ -1,0 +1,23 @@
+{
+  "name": "suede-lang",
+  "displayName": "Suede",
+  "description": "Syntax highlighting for the Suede AI pipeline language",
+  "version": "0.1.0",
+  "publisher": "suede",
+  "engines": { "vscode": "^1.75.0" },
+  "categories": ["Programming Languages"],
+  "contributes": {
+    "languages": [{
+      "id": "suede",
+      "aliases": ["Suede", "suede"],
+      "extensions": [".suede"],
+      "configuration": "./language-configuration.json"
+    }],
+    "grammars": [{
+      "language": "suede",
+      "scopeName": "source.suede",
+      "path": "./syntaxes/suede.tmLanguage.json"
+    }],
+    "semanticTokenScopes": []
+  }
+}

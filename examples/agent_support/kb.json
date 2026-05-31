@@ -1,0 +1,10 @@
+{
+  "password reset": "To reset your password: go to Settings > Security > Reset Password. You'll receive an email within 5 minutes. If you don't see it, check your spam folder.",
+  "billing": "Billing issues can be resolved at Settings > Billing. You can update your payment method, download invoices, or cancel your subscription. Refunds are processed within 5-7 business days.",
+  "login": "If you can't log in: 1) Clear your browser cache, 2) Try incognito mode, 3) Check if your account is locked after 5 failed attempts — wait 15 minutes or reset your password.",
+  "api": "API documentation is at docs.example.com/api. Rate limits are 100 req/min for free tier, 1000 req/min for pro. API keys are managed at Settings > Developer > API Keys.",
+  "integration": "We support integrations with Slack, Jira, GitHub, and Zapier. Set them up at Settings > Integrations. Each integration has a setup wizard. For custom integrations, use our REST API or webhooks.",
+  "export": "To export your data: Settings > Account > Export Data. You'll receive a download link via email within 1 hour. Exports include all projects, tasks, and attachments in JSON format.",
+  "pricing": "Free tier: 3 projects, 10 users. Pro: $12/user/month, unlimited projects. Enterprise: custom pricing, SSO, audit logs, dedicated support. All plans include a 14-day free trial.",
+  "downtime": "Check status.example.com for current system status. Scheduled maintenance happens Sundays 2-4am UTC. If you're experiencing issues outside maintenance windows, contact support."
+}

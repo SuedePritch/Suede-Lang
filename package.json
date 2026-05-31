@@ -1,0 +1,53 @@
+{
+  "name": "suede-lang",
+  "version": "0.1.0",
+  "description": "A language for AI workflows where cost is visible in the syntax",
+  "license": "MIT",
+  "author": "James Pritchard",
+  "homepage": "https://james-pritchard.com/playground",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/jamespritchard/suede-lang"
+  },
+  "keywords": [
+    "ai",
+    "llm",
+    "language",
+    "dsl",
+    "pipeline",
+    "cost",
+    "tokens",
+    "openai",
+    "anthropic",
+    "gemini"
+  ],
+  "type": "module",
+  "main": "src/index.js",
+  "exports": {
+    ".": "./src/index.js",
+    "./analyze": "./src/analyze.js",
+    "./interpreter": "./src/interpreter.js",
+    "./browser": "./dist/suede.browser.js"
+  },
+  "bin": {
+    "suede": "./bin/suede.js"
+  },
+  "files": [
+    "src/",
+    "bin/",
+    "dist/",
+    "browser-entry.js",
+    "README.md",
+    "LANGUAGE.md",
+    "LICENSE"
+  ],
+  "scripts": {
+    "test": "vitest run",
+    "build:browser": "esbuild browser-entry.js --bundle --format=iife --outfile=dist/suede.browser.js --target=es2020 --external:fs --external:path",
+    "prepublishOnly": "npm test && npm run build:browser"
+  },
+  "devDependencies": {
+    "esbuild": "^0.21.5",
+    "vitest": "^1.6.0"
+  }
+}

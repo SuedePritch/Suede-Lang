@@ -1,0 +1,11 @@
+{
+  "job": "Senior Frontend Engineer — Remote. Requirements: 5+ years frontend experience, expert in React and TypeScript, experience with design systems or component libraries, track record of performance optimization, strong communication skills. Nice to have: GraphQL, Next.js, accessibility experience.",
+  "resumes": [
+    "Sarah Chen — Senior Frontend Engineer. 8 years experience. React, TypeScript, Next.js, GraphQL, Tailwind. Led redesign of customer dashboard serving 2M users. Reduced load time 60%. BS Computer Science, Stanford. Previously at Stripe and Figma. Built internal component library adopted by 12 teams.",
+    "Mike Johnson — Junior Developer. 1 year experience. HTML, CSS, some JavaScript. Completed a bootcamp at General Assembly. Built a todo app and a weather widget. No degree. Looking for first full-time role.",
+    "Priya Patel — Full Stack Engineer. 5 years experience. Python, Django, React, PostgreSQL, AWS, Docker. Built ETL pipelines processing 10M records/day. Led migration from monolith to microservices. MS Computer Science, Georgia Tech. Previously at Datadog.",
+    "Tom Williams — DevOps Engineer. 10 years experience. Kubernetes, Terraform, AWS, GCP, CI/CD, monitoring. Zero frontend experience. No JavaScript or React. Managed infrastructure for 500-service platform at scale. BS Systems Engineering, MIT.",
+    "Ana Rodriguez — Frontend Developer. 3 years experience. React, Vue, TypeScript, CSS-in-JS, Storybook. Contributed to open-source design system with 4k GitHub stars. Built accessibility-first component library meeting WCAG 2.1 AA. BA Design, RISD. Self-taught programmer.",
+    "James Liu — Staff Engineer. 12 years experience. React, TypeScript, Node.js, GraphQL, system design. Architected frontend platform serving 50M monthly users at Netflix. Led team of 8. Authored internal RFC process adopted company-wide. MS Computer Science, CMU. 3 patents in UI rendering optimization."
+  ]
+}

@@ -1,0 +1,51 @@
+init {
+  api_keys {
+    gemini = env("GEMINI_API_KEY")
+  }
+
+  model fast = "gemini-3.5-flash" {
+    provider = "gemini"
+    temperature = 0.2
+    max_tokens = 256
+  }
+
+  model smart = "gemini-2.5-pro-preview-06-05" {
+    provider = "gemini"
+    temperature = 0.7
+    max_tokens = 4096
+  }
+}
+
+pipeline support_ticket(message: text) -> obj {
+  let email = message |> after("from ") |> before(" ")
+  let is_urgent = message |> lower() |> contains("urgent")
+
+  let info ~= extract(message, fields: [issue, product, severity]) with fast
+
+  if is_urgent {
+    let diagnosis ~= expand(message, max: 200) with smart
+    let action ~= generate(diagnosis, format: [steps, eta, escalation]) with smart
+    return @Ticket {
+      email, priority: "p0",
+      issue: info.issue, product: info.product,
+      diagnosis, action
+    }
+  } else {
+    if info.severity == "low" {
+      let reply ~= compress(message, max: 80) with fast
+      return @Ticket {
+        email, priority: "p3",
+        issue: info.issue, product: info.product,
+        reply
+      }
+    } else {
+      let team ~= classify(message, into: [billing, engineering, product]) with fast
+      let summary ~= compress(message, max: 120) with fast
+      return @Ticket {
+        email, priority: "p2",
+        issue: info.issue, product: info.product,
+        team, summary
+      }
+    }
+  }
+}

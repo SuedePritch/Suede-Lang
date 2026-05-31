@@ -1,0 +1,43 @@
+init {
+  api_keys {
+    anthropic = env("ANTHROPIC_API_KEY")
+  }
+
+  model fast = "claude-haiku-4-5-20251001" {
+    provider = "anthropic"
+    temperature = 0.2
+    max_tokens = 256
+  }
+
+  model smart = "claude-sonnet-4-6" {
+    provider = "anthropic"
+    temperature = 0.7
+    max_tokens = 4096
+  }
+}
+
+type Lead {
+  domain: text
+  priority: text
+  note: obj
+}
+
+pipeline triage_lead(raw: text) -> Lead {
+  # plain code. free, deterministic, no model. note: no ~
+  let domain = raw |> after("@") |> before(" ")
+
+  # an LLM call. marked with ~= so its cost is visible at a glance.
+  let details ~= extract(raw, fields: [name, company, budget]) with fast
+
+  # branching on a number is an if-statement, not a model call.
+  if details.budget > 15000 {
+    let priority = "hot"
+    let note ~= compress(raw, max: 60, preserve: [budget, timeline]) with smart
+    return @Lead { domain, priority, note }
+  } else {
+    # only the ambiguous case spends a model call to classify.
+    let priority ~= classify(raw, into: [warm, cold]) with fast
+    let note ~= compress(raw, max: 40) with fast
+    return @Lead { domain, priority, note }
+  }
+}

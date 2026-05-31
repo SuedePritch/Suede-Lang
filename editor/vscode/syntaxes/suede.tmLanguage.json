@@ -1,0 +1,219 @@
+{
+  "scopeName": "source.suede",
+  "name": "Suede",
+  "patterns": [
+    { "include": "#comment" },
+    { "include": "#agent-declaration" },
+    { "include": "#pipeline-declaration" },
+    { "include": "#prompt-declaration" },
+    { "include": "#function-declaration" },
+    { "include": "#record-literal" },
+    { "include": "#init-keywords" },
+    { "include": "#model-verbs" },
+    { "include": "#fuzzy-assign" },
+    { "include": "#with-clause" },
+    { "include": "#builtins" },
+    { "include": "#function-call" },
+    { "include": "#string" },
+    { "include": "#number" },
+    { "include": "#boolean-null" },
+    { "include": "#type-annotation" },
+    { "include": "#keywords" },
+    { "include": "#named-arg" },
+    { "include": "#operators" },
+    { "include": "#pipe-operator" }
+  ],
+  "repository": {
+    "comment": {
+      "name": "comment.line.number-sign.suede",
+      "begin": "(?:^|(?<=\\s))#",
+      "end": "$"
+    },
+
+    "pipeline-declaration": {
+      "match": "\\b(pipeline)\\s+([a-zA-Z_][a-zA-Z0-9_]*)",
+      "captures": {
+        "1": { "name": "storage.type.function.suede" },
+        "2": { "name": "entity.name.function.suede" }
+      }
+    },
+
+    "agent-declaration": {
+      "match": "\\b(agent)\\s+([a-zA-Z_][a-zA-Z0-9_]*)",
+      "captures": {
+        "1": { "name": "storage.type.function.suede" },
+        "2": { "name": "entity.name.function.suede" }
+      }
+    },
+
+    "prompt-declaration": {
+      "match": "\\b(prompt)\\s+([a-zA-Z_][a-zA-Z0-9_]*)",
+      "captures": {
+        "1": { "name": "storage.type.function.suede" },
+        "2": { "name": "entity.name.function.suede" }
+      }
+    },
+
+    "function-declaration": {
+      "match": "\\b(function)\\s+([a-zA-Z_][a-zA-Z0-9_]*)",
+      "captures": {
+        "1": { "name": "storage.type.function.suede" },
+        "2": { "name": "entity.name.function.suede" }
+      }
+    },
+
+    "init-keywords": {
+      "patterns": [
+        {
+          "match": "\\b(init|model|store|provider|cache|budget)\\b",
+          "name": "storage.type.suede"
+        }
+      ]
+    },
+
+    "keywords": {
+      "patterns": [
+        {
+          "match": "\\b(let)\\b",
+          "name": "storage.type.suede"
+        },
+        {
+          "match": "\\b(if|else|for|in|into|return|emit|recurse|parallel|try|catch|loop|max|not|and|or)\\b",
+          "name": "keyword.control.suede"
+        },
+        {
+          "match": "\\b(log)\\b",
+          "name": "keyword.control.suede"
+        },
+        {
+          "match": "\\b(tools|use)\\b",
+          "name": "keyword.control.suede"
+        },
+        {
+          "match": "\\b(retry|expect)\\b",
+          "name": "keyword.control.suede"
+        }
+      ]
+    },
+
+    "model-verbs": {
+      "match": "\\b(extract|classify|compress|rewrite|expand|generate|embed)\\s*\\(",
+      "captures": {
+        "1": { "name": "entity.name.function.suede" }
+      }
+    },
+
+    "fuzzy-assign": {
+      "match": "~=",
+      "name": "keyword.operator.suede"
+    },
+
+    "with-clause": {
+      "match": "\\b(with)\\s+([a-zA-Z_][a-zA-Z0-9_]*)\\b",
+      "captures": {
+        "1": { "name": "keyword.control.suede" },
+        "2": { "name": "variable.parameter.suede" }
+      }
+    },
+
+    "named-arg": {
+      "match": "\\b([a-zA-Z_][a-zA-Z0-9_]*)\\s*:(?!:)",
+      "captures": {
+        "1": { "name": "variable.parameter.suede" }
+      }
+    },
+
+    "type-annotation": {
+      "match": "(?<=:\\s*)(text|num|bool|list|obj)\\b",
+      "name": "support.type.suede"
+    },
+
+    "builtins": {
+      "match": "\\b(after|before|trim|lower|upper|len|contains|starts_with|ends_with|split|replace|slice|join|concat|keys|values|has|default|to_num|to_text|range|flat|unique|sort|reverse|first|last|count|is_empty|filter_in|chunk|search|store|env)\\s*\\(",
+      "captures": {
+        "1": { "name": "entity.name.function.suede" }
+      }
+    },
+
+    "function-call": {
+      "match": "\\b([a-zA-Z_][a-zA-Z0-9_]*)\\s*\\(",
+      "captures": {
+        "1": { "name": "entity.name.function.suede" }
+      }
+    },
+
+    "string": {
+      "begin": "\"",
+      "end": "\"",
+      "name": "string.quoted.double.suede",
+      "patterns": [
+        {
+          "match": "\\\\.",
+          "name": "constant.character.escape.suede"
+        },
+        {
+          "begin": "\\$\\{",
+          "end": "\\}",
+          "beginCaptures": {
+            "0": { "name": "punctuation.section.interpolation.begin.suede" }
+          },
+          "endCaptures": {
+            "0": { "name": "punctuation.section.interpolation.end.suede" }
+          },
+          "contentName": "meta.interpolation.suede",
+          "patterns": [
+            {
+              "match": "[a-zA-Z_][a-zA-Z0-9_]*",
+              "name": "variable.other.suede"
+            },
+            {
+              "match": "\\.",
+              "name": "punctuation.accessor.suede"
+            }
+          ]
+        }
+      ]
+    },
+
+    "number": {
+      "match": "\\b[0-9]+(\\.[0-9]+)?\\b",
+      "name": "constant.numeric.suede"
+    },
+
+    "boolean-null": {
+      "match": "\\b(true|false|null)\\b",
+      "name": "constant.language.suede"
+    },
+
+    "operators": {
+      "patterns": [
+        {
+          "match": "->",
+          "name": "storage.type.suede"
+        },
+        {
+          "match": ">=|<=|==|!=|>|<",
+          "name": "keyword.operator.comparison.suede"
+        },
+        {
+          "match": "(?<!=)[+\\-*/]",
+          "name": "keyword.operator.arithmetic.suede"
+        },
+        {
+          "match": "(?<!~)=(?!=)",
+          "name": "keyword.operator.assignment.suede"
+        }
+      ]
+    },
+
+    "record-literal": {
+      "match": "@[A-Za-z_][a-zA-Z0-9_]*",
+      "name": "entity.name.function.suede"
+    },
+
+    "pipe-operator": {
+      "match": "\\|>",
+      "name": "keyword.operator.suede"
+    }
+  }
+}

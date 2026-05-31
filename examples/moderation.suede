@@ -1,0 +1,92 @@
+init {
+  api_keys {
+    gemini = env("GEMINI_API_KEY")
+  }
+
+  model fast = "gemini-3.5-flash" {
+    provider = "gemini"
+    temperature = 0.1
+    max_tokens = 256
+  }
+
+  model thorough = "gemini-2.5-pro-preview-06-05" {
+    provider = "gemini"
+    temperature = 0.3
+    max_tokens = 2048
+  }
+}
+
+type Verdict {
+  action: text
+  toxicity: obj
+  category: obj
+  language: text
+  reason: any
+}
+
+type Report {
+  total: num
+  verdicts: list
+}
+
+# check a single piece of content for policy violations
+pipeline check_content(content: text) -> Verdict {
+  # quick parallel pre-screen — all cheap model calls
+  parallel {
+    let toxicity ~= classify(content, into: [safe, mild, toxic, severe]) with fast
+    let category ~= classify(content, into: [spam, harassment, hate_speech, self_harm, violence, sexual, none]) with fast
+    let language ~= extract(content, fields: [language, contains_pii]) with fast
+  }
+
+  # if clearly safe, fast-track
+  if toxicity.label == "safe" {
+    return @Verdict {
+      action: "allow",
+      toxicity,
+      category,
+      language: language.language,
+      reason: null
+    }
+  } else {
+    # borderline or bad — get a detailed analysis
+    if toxicity.label == "severe" {
+      let reason ~= compress(content, max: 100) with fast
+      return @Verdict {
+        action: "block",
+        toxicity,
+        category,
+        language: language.language,
+        reason
+      }
+    } else {
+      # mild or toxic — needs human-quality reasoning
+      let analysis ~= expand(content, max: 500) with thorough retry 2
+      let decision ~= classify(analysis, into: [allow, flag_review, block]) with thorough
+      let reason ~= compress(analysis, max: 150) with fast
+      return @Verdict {
+        action: decision,
+        toxicity,
+        category,
+        language: language.language,
+        reason
+      }
+    }
+  }
+}
+
+# moderate a batch of content items
+pipeline moderate_batch(items: list) -> Report {
+  for item in items into verdicts {
+    let v = check_content(item)
+    log "${v.action}: ${v.category}"
+    emit v
+  }
+
+  # count results
+  let total = len(verdicts)
+
+  return @Report {
+    total,
+    verdicts
+  }
+}

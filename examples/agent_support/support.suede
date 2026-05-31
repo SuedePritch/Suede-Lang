@@ -1,0 +1,140 @@
+# Support bot — an agent that resolves tickets by searching a knowledge base,
+# replying to the user, or escalating to a human.
+#
+# Usage: node bin/suede.js run examples/agent_support/support.suede handle --arg ticket="I can't reset my password"
+
+init {
+  api_keys {
+    gemini = env("GEMINI_API_KEY")
+  }
+
+  model fast = "gemini-2.0-flash" {
+    provider = "gemini"
+    temperature = 0.2
+    max_tokens = 512
+  }
+
+  model smart = "gemini-2.5-flash" {
+    provider = "gemini"
+    temperature = 0.5
+    max_tokens = 2048
+  }
+
+  budget {
+    max_tokens = 50000
+    on_exceed = "stop"
+  }
+}
+
+type Resolution {
+  status: text
+  response: text
+}
+
+# search the knowledge base for relevant articles
+function search_kb(query: text) -> text {
+  let kb_raw = read("examples/agent_support/kb.json")
+  let kb = parse_json(kb_raw)
+  let query_lower = lower(query)
+
+  # find matching entries by checking if query terms appear in keys
+  let terms = split(query_lower, " ")
+  let all_keys = keys(kb)
+
+  # match kb keys against query terms
+  let matched = js {
+    const out = [];
+    for (const key of all_keys) {
+      for (const term of terms) {
+        if (key.includes(term) || term.includes(key)) {
+          out.push(key + ": " + kb[key]);
+          break;
+        }
+      }
+    }
+    return out.length > 0 ? out.join("\n\n") : "No matching articles found.";
+  }
+  return matched
+}
+
+# send a reply to the user (logs it)
+function send_reply(message: text) -> text {
+  log "REPLY TO USER: ${message}"
+  return message
+}
+
+# escalate to a human agent (logs it)
+function escalate(reason: text) -> text {
+  log "ESCALATED: ${reason}"
+  return reason
+}
+
+# the agent loop — tries to resolve the ticket
+agent support_bot(ticket: text) -> Resolution max 5 {
+  tools {
+    search_kb(query: text) -> text
+    send_reply(message: text) -> text
+    escalate(reason: text) -> text
+  }
+
+  memory {
+    attempts: num = 0
+    context: text = ""
+  }
+
+  loop {
+    let attempts = attempts + 1
+
+    # decide what to do
+    let plan ~= generate(ticket, format: [thought, action, action_input]) with smart
+      system "You are a support agent resolving a ticket. Pick action: search, reply, or escalate. Previous context: ${context}"
+
+    if plan.action == "search" {
+      let results = use("search_kb", plan.action_input)
+      let context = concat(context, results)
+      let answer ~= generate(results, format: [response, confidence]) with smart
+        system "Based on these knowledge base results, draft a helpful reply. Set confidence to high if the answer fully addresses the ticket, low otherwise. Ticket: ${ticket}"
+
+      if answer.confidence == "high" {
+        use("send_reply", answer.response)
+        return @Resolution {
+          status: "resolved",
+          response: answer.response
+        }
+      }
+    }
+
+    if plan.action == "reply" {
+      let reply ~= generate(ticket, format: [response]) with smart
+        system "Draft a helpful reply to this support ticket using context: ${context}"
+      use("send_reply", reply.response)
+      return @Resolution {
+        status: "resolved",
+        response: reply.response
+      }
+    }
+
+    if plan.action == "escalate" {
+      use("escalate", plan.action_input)
+      return @Resolution {
+        status: "escalated",
+        response: plan.action_input
+      }
+    }
+
+    log "attempt ${attempts}: trying another approach"
+  }
+}
+
+# entry point — catches agent max iterations
+pipeline handle(ticket: text) -> Resolution {
+  try {
+    let result = support_bot(ticket)
+    return result
+  } catch err {
+    return @Resolution {
+      status: "failed",
+      response: err.message
+    }
+  }
+}

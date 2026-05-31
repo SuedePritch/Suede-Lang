@@ -1,0 +1,126 @@
+# Resume screener — reads resumes from a JSON file, scores each against a job spec,
+# and routes candidates to reject / maybe / interview with personalized feedback.
+#
+# Usage: node bin/suede.js run examples/resume_screener/screen.suede screen --arg file="examples/resume_screener/resumes.json"
+
+init {
+  api_keys {
+    gemini = env("GEMINI_API_KEY")
+  }
+
+  model fast = "gemini-3.5-flash" {
+    provider = "gemini"
+    temperature = 0.2
+    max_tokens = 4096
+  }
+
+  model smart = "gemini-3.1-pro-preview" {
+    provider = "gemini"
+    temperature = 0.5
+    max_tokens = 4096
+  }
+}
+
+type Candidate {
+  name: text
+  skills: list
+  experience_years: num
+  role_fit: text
+  score: num
+  feedback: text
+}
+
+type Report {
+  total: num
+  interview: list
+  maybe: list
+  reject: list
+}
+
+# score how well a resume fits the job spec (1-10)
+prompt fit_score(resume: text, job: text) -> num {
+  "You are a hiring manager. Rate this resume 1-10 for fit against the job spec. 10 = perfect match, 1 = completely wrong. Be harsh but fair. Resume: ${resume} --- Job spec: ${job}"
+}
+
+# generate personalized feedback for a candidate
+prompt write_feedback(resume: text, job: text, decision: text) -> text {
+  "Write 1-2 sentences of feedback for this candidate. Decision: ${decision}. Be constructive. Resume: ${resume} --- Job spec: ${job}"
+}
+
+# screen a single resume against the job spec
+pipeline screen_one(resume: text, job: text) -> Candidate {
+  # extract structured info — cheap, parallel
+  parallel {
+    let info ~= extract(resume, fields: [name, skills, experience_years]) with fast
+    let role ~= classify(resume, into: [frontend, backend, fullstack, devops, data, other]) with fast
+  }
+
+  # score fit — custom prompt
+  let score ~= fit_score(resume, job) with fast retry 2
+    guard { score >= 1 and score <= 10 }
+
+  # route based on score — interview gets smart feedback, others get fast
+  match true {
+    case score >= 8 {
+      let feedback ~= write_feedback(resume, job, "interview") with smart
+      return @Candidate {
+        name: info.name,
+        skills: info.skills,
+        experience_years: info.experience_years,
+        role_fit: role.label,
+        score,
+        feedback
+      }
+    }
+    case score >= 5 {
+      let feedback ~= write_feedback(resume, job, "maybe — needs further review") with fast
+      return @Candidate {
+        name: info.name,
+        skills: info.skills,
+        experience_years: info.experience_years,
+        role_fit: role.label,
+        score,
+        feedback
+      }
+    }
+    else {
+      let feedback ~= write_feedback(resume, job, "reject") with fast
+      return @Candidate {
+        name: info.name,
+        skills: info.skills,
+        experience_years: info.experience_years,
+        role_fit: role.label,
+        score,
+        feedback
+      }
+    }
+  }
+}
+
+# main entry — read input, screen all resumes, bucket results
+pipeline screen(file: text) -> Report {
+  # read and parse the input file
+  let raw = read(file)
+  let input = parse_json(raw)
+  let job = input.job
+  let resumes = input.resumes
+
+  # screen each resume — all candidates run concurrently
+  parallel for resume in resumes into results {
+    let candidate = screen_one(resume, job)
+    log "${candidate.name}: ${candidate.score}/10 (${candidate.role_fit})"
+    emit candidate
+  }
+
+  # bucket results
+  let interview = filter_gte(results, "score", 8)
+  let maybe = filter_gte(filter_lt(results, "score", 8), "score", 5)
+  let reject = filter_lt(results, "score", 5)
+
+  return @Report {
+    total: len(results),
+    interview,
+    maybe,
+    reject
+  }
+}
