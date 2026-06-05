@@ -84,7 +84,7 @@ suede check triage.suede
 A pre-built browser bundle is included at `dist/suede.browser.js`. It exposes `window.Suede` with `run`, `compileWithFiles`, `Interpreter`, `analyze`, and `check`.
 
 ```html
-<script src="node_modules/suede-lang/dist/suede.browser.js"></script>
+<script src="https://unpkg.com/suede-lang/dist/suede.browser.js"></script>
 <script>
   const { run, compileWithFiles, Interpreter, analyze, check } = window.Suede;
 
