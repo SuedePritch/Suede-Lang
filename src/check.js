@@ -298,5 +298,16 @@ export function check(prog) {
     for (const func of (prog.functions || [])) checkUnhandled(func.body, new Set());
   }
 
+  // validate return types (post-import — types from imported files are now merged)
+  const builtinTypes = new Set(["text", "num", "bool", "list", "obj", "any"]);
+  const allBlocks = [...prog.pipelines, ...(prog.agents || []), ...(prog.functions || [])];
+  if (prog.main && prog.main.returnType) allBlocks.push(prog.main);
+  for (const block of allBlocks) {
+    const rt = block.returnType;
+    if (rt && !builtinTypes.has(rt) && !(prog.types && prog.types[rt])) {
+      warn(block.body?.[0]?.line || 1, `return type '${rt}' is not defined — add a 'type ${rt} { ... }' block`);
+    }
+  }
+
   return errors;
 }

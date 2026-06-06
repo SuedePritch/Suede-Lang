@@ -91,16 +91,20 @@ export function parse(toks) {
     }
     // validate return types: if a return type matches a type name, great.
     // if it looks like a custom type (capitalized) but no type block exists, error.
-    const builtinTypes = new Set(["text", "num", "bool", "list", "obj", "any"]);
-    const allBlocks = [...pipelines, ...agents, ...functions];
-    if (main && main.returnType) allBlocks.push(main);
-    for (const block of allBlocks) {
-      const rt = block.returnType;
-      if (rt && !builtinTypes.has(rt) && !types[rt]) {
-        throw new ParseError(
-          `return type '${rt}' is not defined — add a 'type ${rt} { ... }' block`,
-          block.body?.[0]?.line || 1, 1,
-        );
+    // skip this check if the file has imports — types may come from imported files
+    // and will be validated after import resolution in check.js
+    if (imports.length === 0) {
+      const builtinTypes = new Set(["text", "num", "bool", "list", "obj", "any"]);
+      const allBlocks = [...pipelines, ...agents, ...functions];
+      if (main && main.returnType) allBlocks.push(main);
+      for (const block of allBlocks) {
+        const rt = block.returnType;
+        if (rt && !builtinTypes.has(rt) && !types[rt]) {
+          throw new ParseError(
+            `return type '${rt}' is not defined — add a 'type ${rt} { ... }' block`,
+            block.body?.[0]?.line || 1, 1,
+          );
+        }
       }
     }
 
@@ -465,7 +469,8 @@ export function parse(toks) {
   }
 
   function parseStmt() {
-    if (at(TT.LET)) {
+    if (at(TT.LET) || at(TT.CONST)) {
+      const isConst = at(TT.CONST);
       const lineTok = next();
       const name = eat(TT.IDENT, "variable name").value;
       let fuzzy = false;
@@ -525,6 +530,7 @@ export function parse(toks) {
         name,
         value,
         fuzzy,
+        mutable: !isConst,
         withModel,
         retryCount,
         useCache,

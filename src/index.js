@@ -13,10 +13,46 @@ export { Interpreter, RuntimeError, SuedeError } from "./interpreter.js";
 export { asJson } from "./verbs.js";
 export { check } from "./check.js";
 
+function findConfig(startDir) {
+  if (!readFileSync || !resolve) return null;
+  let dir = startDir;
+  while (true) {
+    try {
+      const configPath = resolve(dir, "config.suede");
+      const configSrc = readFileSync(configPath, "utf-8");
+      return { src: configSrc, path: configPath };
+    } catch { /* not here, keep looking */ }
+    const parent = dirname(dir);
+    if (parent === dir) return null; // hit filesystem root
+    dir = parent;
+  }
+}
+
 export function compile(src, basePath) {
   const prog = parse(lex(src));
   if (prog.imports?.length && basePath) {
     resolveImports(prog, basePath, new Set());
+  }
+  // convention: config.suede holds the init block
+  // walks up from basePath like package.json / tsconfig.json
+  if (!prog.init && basePath) {
+    const config = findConfig(basePath);
+    if (config) {
+      try {
+        const configProg = parse(lex(config.src));
+        if (configProg.init) prog.init = configProg.init;
+        if (configProg.types) {
+          prog.types = prog.types || {};
+          Object.assign(prog.types, configProg.types);
+        }
+        if (configProg.errors) {
+          prog.errors = prog.errors || {};
+          Object.assign(prog.errors, configProg.errors);
+        }
+      } catch (e) {
+        throw new Error(`${config.path}: ${e.message}`);
+      }
+    }
   }
   return prog;
 }
@@ -26,6 +62,26 @@ export function compileWithFiles(src, files) {
   const prog = parse(lex(src));
   if (prog.imports?.length && files) {
     resolveImportsFromMap(prog, files, new Set());
+  }
+  // look for config.suede in the file map
+  if (!prog.init && files) {
+    const configSrc = files.get("config.suede") || files.get("./config.suede");
+    if (configSrc) {
+      try {
+        const configProg = parse(lex(configSrc));
+        if (configProg.init) prog.init = configProg.init;
+        if (configProg.types) {
+          prog.types = prog.types || {};
+          Object.assign(prog.types, configProg.types);
+        }
+        if (configProg.errors) {
+          prog.errors = prog.errors || {};
+          Object.assign(prog.errors, configProg.errors);
+        }
+      } catch (e) {
+        throw new Error(`config.suede: ${e.message}`);
+      }
+    }
   }
   return prog;
 }
@@ -46,40 +102,24 @@ function resolveImportsFromMap(prog, files, seen) {
     const dep = parse(lex(src));
     if (dep.imports?.length) resolveImportsFromMap(dep, files, seen);
 
-    const isNamespace = imp.names.length === 1 && imp.names[0].isNamespace;
-
-    if (isNamespace) {
-      for (const p of dep.pipelines) prog.pipelines.push(p);
-      for (const a of dep.agents || []) prog.agents.push(a);
-      for (const f of dep.functions || []) prog.functions.push(f);
-      for (const p of dep.prompts || []) prog.prompts.push(p);
-    } else {
-      const wanted = new Set(imp.names.map((n) => n.name));
-      for (const p of dep.pipelines) {
-        if (wanted.has(p.name)) {
-          const alias = imp.names.find((n) => n.name === p.name)?.alias || p.name;
-          prog.pipelines.push(alias !== p.name ? { ...p, name: alias } : p);
-        }
-      }
-      for (const a of dep.agents || []) {
-        if (wanted.has(a.name)) {
-          const alias = imp.names.find((n) => n.name === a.name)?.alias || a.name;
-          prog.agents.push(alias !== a.name ? { ...a, name: alias } : a);
-        }
-      }
-      for (const f of dep.functions || []) {
-        if (wanted.has(f.name)) {
-          const alias = imp.names.find((n) => n.name === f.name)?.alias || f.name;
-          prog.functions.push(alias !== f.name ? { ...f, name: alias } : f);
-        }
-      }
-      for (const p of dep.prompts || []) {
-        if (wanted.has(p.name)) {
-          const alias = imp.names.find((n) => n.name === p.name)?.alias || p.name;
-          prog.prompts.push(alias !== p.name ? { ...p, name: alias } : p);
-        }
-      }
+    // always merge types, errors, and init — they're project-global
+    if (dep.types) {
+      prog.types = prog.types || {};
+      Object.assign(prog.types, dep.types);
     }
+    if (dep.errors) {
+      prog.errors = prog.errors || {};
+      Object.assign(prog.errors, dep.errors);
+    }
+    if (dep.init && !prog.init) {
+      prog.init = dep.init;
+    }
+
+    // merge all callables — see resolveImports for rationale
+    for (const p of dep.pipelines) prog.pipelines.push(p);
+    for (const a of dep.agents || []) prog.agents.push(a);
+    for (const f of dep.functions || []) prog.functions.push(f);
+    for (const p of dep.prompts || []) prog.prompts.push(p);
   }
 }
 
@@ -104,45 +144,26 @@ function resolveImports(prog, basePath, seen) {
 
     const isNamespace = imp.names.length === 1 && imp.names[0].isNamespace;
 
-    if (isNamespace) {
-      // import everything — prefix names with namespace
-      // but also make them available unprefixed for internal cross-references
-      for (const p of dep.pipelines) prog.pipelines.push(p);
-      for (const a of dep.agents || []) prog.agents.push(a);
-      for (const f of dep.functions || []) prog.functions.push(f);
-      for (const p of dep.prompts || []) prog.prompts.push(p);
-    } else {
-      // selective import — only pull in named items
-      const wanted = new Set(imp.names.map((n) => n.name));
-      for (const p of dep.pipelines) {
-        if (wanted.has(p.name)) {
-          const alias =
-            imp.names.find((n) => n.name === p.name)?.alias || p.name;
-          prog.pipelines.push(alias !== p.name ? { ...p, name: alias } : p);
-        }
-      }
-      for (const a of dep.agents || []) {
-        if (wanted.has(a.name)) {
-          const alias =
-            imp.names.find((n) => n.name === a.name)?.alias || a.name;
-          prog.agents.push(alias !== a.name ? { ...a, name: alias } : a);
-        }
-      }
-      for (const f of dep.functions || []) {
-        if (wanted.has(f.name)) {
-          const alias =
-            imp.names.find((n) => n.name === f.name)?.alias || f.name;
-          prog.functions.push(alias !== f.name ? { ...f, name: alias } : f);
-        }
-      }
-      for (const p of dep.prompts || []) {
-        if (wanted.has(p.name)) {
-          const alias =
-            imp.names.find((n) => n.name === p.name)?.alias || p.name;
-          prog.prompts.push(alias !== p.name ? { ...p, name: alias } : p);
-        }
-      }
+    // always merge types, errors, and init — they're project-global
+    if (dep.types) {
+      prog.types = prog.types || {};
+      Object.assign(prog.types, dep.types);
     }
+    if (dep.errors) {
+      prog.errors = prog.errors || {};
+      Object.assign(prog.errors, dep.errors);
+    }
+    if (dep.init && !prog.init) {
+      prog.init = dep.init;
+    }
+
+    // merge all callables — selective imports control what names are
+    // public, but internally merged bodies may reference helpers from
+    // the same source file, so the full set must be available
+    for (const p of dep.pipelines) prog.pipelines.push(p);
+    for (const a of dep.agents || []) prog.agents.push(a);
+    for (const f of dep.functions || []) prog.functions.push(f);
+    for (const p of dep.prompts || []) prog.prompts.push(p);
   }
 }
 

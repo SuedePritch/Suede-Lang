@@ -1,8 +1,8 @@
 #!/usr/bin/env node
 
-import { readFileSync, existsSync } from "fs";
-import { resolve, dirname } from "path";
-import { run, compile, check } from "../src/index.js";
+import { readFileSync, existsSync, readdirSync } from "fs";
+import { resolve, dirname, join } from "path";
+import { run, compile, compileWithFiles, check } from "../src/index.js";
 
 const args = process.argv.slice(2);
 
@@ -10,31 +10,43 @@ function usage() {
   console.log(`suede v0.1
 
 Usage:
-  suede run <file.suede> [entry] [--arg key=value ...]
-  suede analyze <file.suede> [entry]
-  suede check <file.suede>
+  suede run [file] [pipeline|agent] [--arg key=value ...]
+  suede analyze [file] [pipeline|agent]
+  suede check [file]
+
+Defaults to main.suede if no file is given.
+Uses the main() block as entry point if present.
+Config is loaded from config.suede (walks up the directory tree).
 
 Options:
-  --arg key=value    Pass arguments to the entry pipeline/agent
+  --arg key=value    Pass arguments
   --quiet            Suppress trace output
   --json             Output result as JSON
 
 Examples:
-  suede run triage.suede triage_lead --arg raw="email text here"
-  suede analyze triage.suede triage_lead
-  suede check triage.suede`);
+  suede run --arg text="input here"
+  suede check
+  suede analyze
+  suede run other.suede my_pipeline --arg raw="data"`);
   process.exit(0);
 }
 
 if (args.length === 0 || args[0] === "--help" || args[0] === "-h") usage();
 
 const cmd = args[0];
-const file = args[1];
 
-if (!file) {
-  console.error("error: no file specified");
-  process.exit(1);
+// figure out if args[1] is a file, an entry name, or a flag
+let file = "main.suede";
+let argStart = 2;
+if (args[1] && !args[1].startsWith("--") && args[1].endsWith(".suede")) {
+  file = args[1];
+} else if (args[1] && !args[1].startsWith("--")) {
+  // could be an entry name — keep file as main.suede
+  argStart = 1; // re-parse from args[1]
+} else if (args[1] && args[1].startsWith("--")) {
+  argStart = 1; // no file, no entry — flags start at args[1]
 }
+
 if (!existsSync(file)) {
   console.error(`error: file not found: ${file}`);
   process.exit(1);
@@ -44,12 +56,16 @@ const filePath = resolve(file);
 const src = readFileSync(filePath, "utf-8");
 const basePath = dirname(filePath);
 
-// parse --arg flags
-const entryArg = args[2] && !args[2].startsWith("--") ? args[2] : null;
+// parse entry name and flags
+let entryArg = null;
+if (args[argStart] && !args[argStart].startsWith("--") && !args[argStart].endsWith(".suede")) {
+  entryArg = args[argStart];
+  argStart++;
+}
 const flags = { quiet: false, json: false };
 const entryArgs = {};
 
-for (let i = entryArg ? 3 : 2; i < args.length; i++) {
+for (let i = argStart; i < args.length; i++) {
   if (args[i] === "--quiet") {
     flags.quiet = true;
     continue;

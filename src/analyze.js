@@ -29,7 +29,6 @@ function bestCaseOutput(verb, namedOpts) {
       return 1;
     }
     case "extract": {
-      // realistic: {"field":"short value"} per field
       const fields = namedOpts.fields;
       const names = Array.isArray(fields) ? fields : ["field"];
       const sim =
@@ -37,7 +36,6 @@ function bestCaseOutput(verb, namedOpts) {
       return tokensFromChars(sim.length);
     }
     case "compress": {
-      // best case: a tight summary, maybe half the max
       const max = namedOpts.max;
       return max
         ? Math.max(3, Math.ceil(tokensFromChars(Number(max)) * 0.5))
@@ -125,7 +123,6 @@ export function analyze(prog, args, onStep, entry) {
     return [];
   }
 
-  // use the actual input text for prompt estimation
   const inputText = typeof args === "string" ? args : JSON.stringify(args);
 
   // if entry is an agent, wrap it as a synthetic pipeline that calls the agent
@@ -169,69 +166,132 @@ export function analyze(prog, args, onStep, entry) {
   // track visited callables to prevent infinite recursion
   const visiting = new Set();
 
-  // walk into a call expression — if it's a pipeline/function/agent, walk its body
+  // walk a Use() expression — resolve the tool to its definition and walk it
+  function walkUseExpr(expr, path, depth) {
+    if (!expr || expr.kind !== "Use") return;
+    // use() args: first arg is the tool name (string literal)
+    const nameExpr = expr.args?.[0];
+    if (!nameExpr) return;
+    const toolName = nameExpr.kind === "Str" ? nameExpr.value : null;
+    if (!toolName) return;
+    if (visiting.has(toolName)) return;
+    visiting.add(toolName);
+
+    // resolve tool to function, pipeline, or agent
+    const func = (prog.functions || []).find((f) => f.name === toolName);
+    if (func) {
+      walkBlock(func.body, path, depth);
+      visiting.delete(toolName);
+      return;
+    }
+    const calledPipe = prog.pipelines.find((p) => p.name === toolName);
+    if (calledPipe) {
+      walkBlock(calledPipe.body, path, depth);
+      visiting.delete(toolName);
+      return;
+    }
+    const calledAgent = (prog.agents || []).find((a) => a.name === toolName);
+    if (calledAgent) {
+      walkAgentCall(calledAgent, path, depth);
+      visiting.delete(toolName);
+      return;
+    }
+    visiting.delete(toolName);
+  }
+
+  // walk into a call expression — pipeline, function, or agent
   function walkCallExpr(expr, path, depth) {
-    if (!expr || expr.kind !== "Call") return;
+    if (!expr) return;
+    // handle Use() calls
+    if (expr.kind === "Use") {
+      walkUseExpr(expr, path, depth);
+      return;
+    }
+    if (expr.kind !== "Call") return;
     const name = expr.callee;
-    if (visiting.has(name)) return; // prevent cycles
+    if (visiting.has(name)) return;
     visiting.add(name);
-    // pipeline call
+
     const calledPipe = prog.pipelines.find((p) => p.name === name);
     if (calledPipe) {
       walkBlock(calledPipe.body, path, depth);
       visiting.delete(name);
       return;
     }
-    // function call
     const calledFunc = (prog.functions || []).find((f) => f.name === name);
     if (calledFunc) {
       walkBlock(calledFunc.body, path, depth);
       visiting.delete(name);
       return;
     }
-    // agent call — best case: 1 iteration (cheapest branch), worst case: maxIter × costliest branch
     const calledAgent = (prog.agents || []).find((a) => a.name === name);
     if (calledAgent) {
-      const agentRoot = { label: "agent-iter", steps: [], children: [] };
-      walkBlock(calledAgent.loopBody, agentRoot, depth);
-
-      // collect all single-iteration paths
-      const iterPaths = [];
-      (function collectIter(node, acc) {
-        const cur = [...acc, ...node.steps];
-        if (node.children.length === 0) iterPaths.push(cur);
-        else node.children.forEach(ch => collectIter(ch, cur));
-      })(agentRoot, []);
-
-      const costOf = (steps) => {
-        let t = 0;
-        for (const s of steps) if (s.type === "model") t += s.inputTokens + s.outputWorst;
-        return t;
-      };
-      iterPaths.sort((a, b) => costOf(a) - costOf(b));
-
-      // best case: 1 iteration, cheapest branch
-      const bestChild = { label: "agent-best", steps: [...iterPaths[0]], children: [] };
-      path.children.push(bestChild);
-
-      // worst case: maxIter iterations, costliest branch each time
-      const worst = iterPaths[iterPaths.length - 1];
-      const worstChild = { label: "agent-worst", steps: [], children: [] };
-      for (let i = 0; i < calledAgent.maxIter; i++) {
-        for (const s of worst) worstChild.steps.push({...s});
-      }
-      path.children.push(worstChild);
+      walkAgentCall(calledAgent, path, depth);
       visiting.delete(name);
       return;
     }
     visiting.delete(name);
   }
 
+  // walk an agent call — produces best (1 iter) and worst (maxIter) branches
+  function walkAgentCall(agent, path, depth) {
+    const agentRoot = { label: "agent-iter", steps: [], children: [] };
+    walkBlock(agent.loopBody, agentRoot, depth);
+
+    const iterPaths = [];
+    (function collectIter(node, acc) {
+      const cur = [...acc, ...node.steps];
+      if (node.children.length === 0) iterPaths.push(cur);
+      else node.children.forEach(ch => collectIter(ch, cur));
+    })(agentRoot, []);
+
+    if (iterPaths.length === 0) return;
+
+    const costOf = (steps) => {
+      let t = 0;
+      for (const s of steps) if (s.type === "model") t += s.inputTokens + s.outputWorst;
+      return t;
+    };
+    iterPaths.sort((a, b) => costOf(a) - costOf(b));
+
+    // best case: 1 iteration, cheapest branch
+    const bestChild = { label: "agent-best", steps: [...iterPaths[0]], children: [] };
+    path.children.push(bestChild);
+
+    // worst case: maxIter iterations, costliest branch each time
+    const worst = iterPaths[iterPaths.length - 1];
+    const worstChild = { label: "agent-worst", steps: [], children: [] };
+    for (let i = 0; i < agent.maxIter; i++) {
+      for (const s of worst) worstChild.steps.push({...s});
+    }
+    path.children.push(worstChild);
+  }
+
+  // recursively walk an expression tree looking for Use() and Call nodes
+  function walkExprDeep(expr, path, depth) {
+    if (!expr) return;
+    if (expr.kind === "Use") {
+      walkUseExpr(expr, path, depth);
+      return;
+    }
+    if (expr.kind === "Call") {
+      walkCallExpr(expr, path, depth);
+      return;
+    }
+    // walk into sub-expressions
+    if (expr.args) for (const a of expr.args) walkExprDeep(a, path, depth);
+    if (expr.left) walkExprDeep(expr.left, path, depth);
+    if (expr.right) walkExprDeep(expr.right, path, depth);
+    if (expr.operand) walkExprDeep(expr.operand, path, depth);
+    if (expr.value) walkExprDeep(expr.value, path, depth);
+    if (expr.items) for (const i of expr.items) walkExprDeep(i, path, depth);
+  }
+
   function walkStmt(stmt, path, depth) {
     switch (stmt.kind) {
       case "Let":
         if (stmt.fuzzy) {
-          // check if it's a custom prompt or builtin verb
+          // model call — check if it's a custom prompt or builtin verb
           addModelStep(stmt, path, depth);
         } else {
           path.steps.push({
@@ -240,12 +300,15 @@ export function analyze(prog, args, onStep, entry) {
             name: stmt.name,
             depth,
           });
-          // if the value is a call to a pipeline/function/agent, walk into it
-          walkCallExpr(stmt.value, path, depth);
+          // walk into calls in the value expression
+          walkExprDeep(stmt.value, path, depth);
         }
         break;
       case "Parallel":
-        for (const s of stmt.stmts) addModelStep(s, path, depth);
+        // parallel { } block — each statement could be a model call or anything else
+        for (const s of stmt.stmts) {
+          walkStmt(s, path, depth);
+        }
         break;
       case "If": {
         const thenPath = { label: "then", steps: [], children: [] };
@@ -276,13 +339,32 @@ export function analyze(prog, args, onStep, entry) {
         break;
       case "Try":
         walkBlock(stmt.tryBody, path, depth);
+        // also walk catch bodies — they can contain model calls (e.g. rewrite on failure)
+        if (stmt.catches) {
+          for (const c of stmt.catches) {
+            const catchPath = { label: "catch", steps: [], children: [] };
+            path.children.push(catchPath);
+            walkBlock(c.body, catchPath, depth + 1);
+          }
+        }
         break;
       case "Return":
         path.steps.push({ type: "return", depth });
+        // walk into the return expression — it might contain pipeline/agent calls
+        walkExprDeep(stmt.value, path, depth);
+        break;
+      case "Emit":
+        // emit might contain a call expression
+        walkExprDeep(stmt.value, path, depth);
         break;
       case "ExprStmt":
-        // expression statements might be pipeline/function calls
-        walkCallExpr(stmt.expr, path, depth);
+        walkExprDeep(stmt.expr, path, depth);
+        break;
+      case "Log":
+        // no cost
+        break;
+      case "Throw":
+        // no model cost
         break;
       default:
         break;
@@ -301,23 +383,24 @@ export function analyze(prog, args, onStep, entry) {
       else node.children.forEach(ch => collectIter(ch, cur));
     })(root, []);
 
-    const costOf = (steps) => {
-      let t = 0;
-      for (const s of steps) if (s.type === "model") t += s.inputTokens + s.outputWorst;
-      return t;
-    };
-    iterResults.sort((a, b) => costOf(a) - costOf(b));
+    if (iterResults.length > 0) {
+      const costOf = (steps) => {
+        let t = 0;
+        for (const s of steps) if (s.type === "model") t += s.inputTokens + s.outputWorst;
+        return t;
+      };
+      iterResults.sort((a, b) => costOf(a) - costOf(b));
 
-    // rebuild root with best (1 iter, cheapest) and worst (maxIter, costliest)
-    root.steps = [];
-    root.children = [];
-    root.children.push({ label: "agent-best", steps: [...iterResults[0]], children: [] });
-    const worst = iterResults[iterResults.length - 1];
-    const worstChild = { label: "agent-worst", steps: [], children: [] };
-    for (let i = 0; i < pipe._maxIter; i++) {
-      for (const s of worst) worstChild.steps.push({...s});
+      root.steps = [];
+      root.children = [];
+      root.children.push({ label: "agent-best", steps: [...iterResults[0]], children: [] });
+      const worst = iterResults[iterResults.length - 1];
+      const worstChild = { label: "agent-worst", steps: [], children: [] };
+      for (let i = 0; i < pipe._maxIter; i++) {
+        for (const s of worst) worstChild.steps.push({...s});
+      }
+      root.children.push(worstChild);
     }
-    root.children.push(worstChild);
   }
 
   // collect all paths
@@ -358,7 +441,6 @@ export function analyze(prog, args, onStep, entry) {
       worstTokens += m.inputTokens + m.worstOut;
     }
 
-    // budget check
     let budgetWarning = null;
     if (budget?.max_tokens && worstTokens > budget.max_tokens) {
       budgetWarning = `worst case ${worstTokens} exceeds budget of ${budget.max_tokens}`;

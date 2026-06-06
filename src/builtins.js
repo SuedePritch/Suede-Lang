@@ -71,7 +71,10 @@ export const BUILTINS = {
   len: (x) => x.length,
   slice: (list, start, end) => list.slice(start, end),
   join: (list, sep) => list.join(sep || ", "),
-  concat: (a, b) => (typeof a === "string" ? a + b : [...a, ...b]),
+  concat: (...args) => {
+    if (typeof args[0] === "string") return args.join("");
+    return args.reduce((acc, a) => [...acc, ...(Array.isArray(a) ? a : [a])], []);
+  },
   filter_in: (list, allowed) => list.filter((x) => allowed.includes(x)),
   first: (list) => list[0],
   last: (list) => list[list.length - 1],

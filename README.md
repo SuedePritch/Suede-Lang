@@ -32,51 +32,132 @@ pipeline triage(raw: text) -> Lead {
 npm install suede-lang
 ```
 
+## Project structure
+
+A Suede project uses two conventions:
+
+- **`config.suede`** — holds the `init` block (API keys, models, cache, budget). The compiler finds it automatically by walking up from whatever file you run — like `tsconfig.json`. You never import it. Every file in the project can use `with fast` or `with smart` without importing config.
+
+- **`main.suede`** — the entry point. Should contain a `main()` block. All CLI commands (`run`, `check`, `analyze`) default to `main.suede` if no file is specified.
+
+```
+my-project/
+  config.suede      # init block — models, keys, cache, budget
+  main.suede        # entry point with main() block
+  helpers.suede     # free functions
+  types.suede       # type definitions
+```
+
+### config.suede
+
+```suede
+init {
+  api_keys {
+    gemini = env("GEMINI_API_KEY")
+  }
+
+  model fast = "gemini-3.5-flash" {
+    provider = "gemini"
+    temperature = 0.2
+    max_tokens = 1024
+  }
+
+  model smart = "gemini-3.1-pro-preview" {
+    provider = "gemini"
+    temperature = 0.7
+    max_tokens = 4096
+  }
+
+  cache { enabled = true, ttl = 3600 }
+  budget { max_tokens = 100000, on_exceed = "stop" }
+}
+```
+
+### main block
+
+The `main` block is the default entry point. If a file has one, `suede run` uses it automatically:
+
+```suede
+main(raw: text) -> Lead {
+  let domain  = raw |> after("@") |> before(" ")
+  let details ~= extract(raw, fields: [name, budget])
+  return @Lead { domain, priority: "new", details }
+}
+```
+
+If there's no `main`, specify which pipeline or agent to run:
+
+```bash
+suede run app.suede my_pipeline --arg raw="data"
+```
+
 ## Usage
+
+### CLI
+
+```bash
+# all commands default to main.suede
+suede run --arg raw="email text here"
+suede check
+suede analyze
+
+# or specify a file
+suede run app.suede --arg raw="email text here"
+
+# run a specific pipeline or agent instead of main()
+suede run app.suede triage_lead --arg raw="email text here"
+```
 
 ### Node.js
 
 ```js
 import { run, stubModel } from "suede-lang";
 
-// with a real provider (configured in the .suede init block)
-const { value, stats } = await run(src, "triage", { raw: "email text" });
+// with a real provider (config.suede is found from basePath)
+const { value, stats } = await run(
+  src,
+  null,
+  { raw: "email text" },
+  null,
+  null,
+  "./",
+);
+
+// run a specific pipeline
+const { value, stats } = await run(
+  src,
+  "triage",
+  { raw: "email text" },
+  null,
+  null,
+  "./",
+);
 
 // with a stub for testing (no API calls)
-const { value, stats } = await run(src, "triage", { raw: "email text" }, stubModel());
+const { value, stats } = await run(
+  src,
+  "triage",
+  { raw: "email text" },
+  stubModel(),
+);
 
-stats.modelCalls;    // number of ~= calls
-stats.codeSteps;     // number of = bindings
-stats.inputTokens;   // total input tokens
-stats.outputTokens;  // total output tokens
+stats.modelCalls; // number of ~= calls
+stats.codeSteps; // number of = bindings
+stats.inputTokens; // total input tokens
+stats.outputTokens; // total output tokens
 ```
 
 ### Static analysis
-
-Estimate cost without calling any models:
 
 ```js
 import { compile } from "suede-lang";
 import { analyze } from "suede-lang/analyze";
 
-const prog = compile(src, basePath);
+const prog = compile(src, basePath); // basePath needed to find config.suede
 const paths = analyze(prog, { raw: "input" }, () => {});
 
 // paths[0].bestTokens, paths[0].worstTokens, paths[0].modelCalls
 // paths[0].byModel — per-model breakdown
-```
-
-### CLI
-
-```bash
-# run a program
-suede run triage.suede --arg raw="email text here"
-
-# static analysis
-suede analyze triage.suede
-
-# check syntax + static validation (catches =  on model verbs, missing args, etc.)
-suede check triage.suede
 ```
 
 ### Browser
@@ -88,13 +169,19 @@ A pre-built browser bundle is included at `dist/suede.browser.js`. It exposes `w
 <script>
   const { run, compileWithFiles, Interpreter, analyze, check } = window.Suede;
 
+  // include config.suede in the file map — it's found automatically
+  const files = new Map([
+    ["config.suede", configSrc],
+    ["app.suede", appSrc],
+  ]);
+
   // quick — run a program directly
-  const { value, stats } = await run(src, "triage", { raw: "text" }, modelFn);
+  const { value, stats } = await run(src, null, { raw: "text" }, modelFn);
 
   // or compile + run separately
-  const prog = compileWithFiles(src, fileMap);
+  const prog = compileWithFiles(src, files);
   const interp = new Interpreter(modelFn, onStep);
-  const result = await interp.run(prog, "triage", { raw: "text" });
+  const result = await interp.run(prog, null, { raw: "text" });
 </script>
 ```
 
@@ -109,14 +196,14 @@ The interpreter enforces this both ways. You cannot use `=` on a model verb, and
 
 Six built-in verbs that require `~=`:
 
-| Verb | Purpose | Returns |
-|------|---------|---------|
-| `extract` | Pull structured fields from text | `{ field: value, ... }` |
-| `classify` | Categorize into one of N labels | `{ label: "category" }` |
-| `compress` | Summarize/shorten text | `{ text: "summary" }` |
-| `rewrite` | Transform text style/format | `{ text: "rewritten" }` |
-| `expand` | Elaborate on text | `{ text: "expanded" }` |
-| `generate` | Create new content | `{ field: value, ... }` |
+| Verb       | Purpose                          | Returns                 |
+| ---------- | -------------------------------- | ----------------------- |
+| `extract`  | Pull structured fields from text | `{ field: value, ... }` |
+| `classify` | Categorize into one of N labels  | `{ label: "category" }` |
+| `compress` | Summarize/shorten text           | `{ text: "summary" }`   |
+| `rewrite`  | Transform text style/format      | `{ text: "rewritten" }` |
+| `expand`   | Elaborate on text                | `{ text: "expanded" }`  |
+| `generate` | Create new content               | `{ field: value, ... }` |
 
 ## Rate limiting
 
@@ -142,6 +229,7 @@ pipeline analyze(text: text) -> Analysis {
 Field types: `text`, `num`, `bool`, `list`, `obj`, `any`
 
 **What gets checked:**
+
 - `@Analysis { ... }` — missing fields, extra fields, wrong types
 - `-> Analysis` on a pipeline/agent/function — return value must match the schema
 - `(data: Analysis)` — parameter must match the schema when passed in
@@ -187,6 +275,8 @@ Built-in runtime errors are also catchable: `TimedOut`, `BudgetExceeded`, `Agent
 - **Agents** — goal-seeking loops with tools (including other agents), memory, and max iteration caps
 - **Custom prompts** — define your own model verbs with typed returns
 - **Functions** — free helper functions, no model calls
+- **config.suede** — project-wide init block, auto-discovered by walking up the directory tree
+- **main block** — default entry point, runs automatically with `suede run`
 - **Multi-file imports** — selective or namespace imports with cycle detection
 - **Control flow** — `if`/`else`, `for`/`in`/`into`/`emit`, `match`/`case`, `try`/`catch`, `throw`, `recurse`
 - **Parallel** — `parallel { }` for concurrent model calls, `parallel for` for concurrent loop iterations

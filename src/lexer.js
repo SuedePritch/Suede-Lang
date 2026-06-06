@@ -8,6 +8,7 @@ export const TT = {
   IDENT: "IDENT",
   PIPELINE: "PIPELINE",
   LET: "LET",
+  CONST: "CONST",
   IF: "IF",
   ELSE: "ELSE",
   FOR: "FOR",
@@ -84,6 +85,7 @@ export const TT = {
 const KEYWORDS = {
   pipeline: TT.PIPELINE,
   let: TT.LET,
+  const: TT.CONST,
   if: TT.IF,
   else: TT.ELSE,
   for: TT.FOR,
@@ -187,8 +189,14 @@ export function lex(src) {
       let hasInterp = false;
       while (i < src.length && peek() !== '"') {
         if (peek() === "\\") {
-          adv();
-          current += adv();
+          adv(); // skip backslash
+          const esc = adv();
+          if (esc === "n") current += "\n";
+          else if (esc === "t") current += "\t";
+          else if (esc === "r") current += "\r";
+          else if (esc === "\\") current += "\\";
+          else if (esc === '"') current += '"';
+          else current += esc;
         } else if (peek() === "$" && peek(1) === "{") {
           hasInterp = true;
           if (current) parts.push({ type: "lit", value: current });

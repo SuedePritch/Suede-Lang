@@ -343,6 +343,11 @@ export class Interpreter {
         } else {
           const value = await this._evalExpr(prog, stmt.value, scope);
           scope.set(stmt.name, value);
+          // track mutability
+          if (stmt.mutable !== false) {
+            if (!scope.has("__mutable__")) scope.set("__mutable__", new Set());
+            scope.get("__mutable__").add(stmt.name);
+          }
           this.stats.codeSteps++;
           this.stats.trace.push({ line: stmt.line, kind: "code" });
           this.onStep({
@@ -362,11 +367,20 @@ export class Interpreter {
           took: cond ? "then" : "else",
           cond,
         });
-        return this._execBlock(
+        const inner = new Map(scope);
+        const flow = await this._execBlock(
           prog,
           cond ? stmt.then : stmt.else,
-          new Map(scope),
+          inner,
         );
+        // propagate only mutable (let) bindings back to outer scope
+        const mutable = scope.get("__mutable__");
+        if (mutable) {
+          for (const k of mutable) {
+            if (inner.has(k)) scope.set(k, inner.get(k));
+          }
+        }
+        return flow;
       }
       case "For": {
         const iter = await this._evalExpr(prog, stmt.iter, scope);
@@ -403,6 +417,13 @@ export class Interpreter {
             const flow = await this._execBlock(prog, stmt.body, inner);
             if (flow && flow[EMIT] !== undefined) collected.push(flow[EMIT]);
             else if (flow && flow[RETURN] !== undefined) return flow;
+            // propagate only mutable (let) bindings back to outer scope
+            const mutable = scope.get("__mutable__");
+            if (mutable) {
+              for (const k of mutable) {
+                if (k !== stmt.varName && inner.has(k)) scope.set(k, inner.get(k));
+              }
+            }
           }
           if (collected.length > 0 && stmt.collectAs)
             scope.set(stmt.collectAs, collected);
