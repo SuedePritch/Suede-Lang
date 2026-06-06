@@ -1,5 +1,26 @@
 # Changelog
 
+## v0.1.4 (2026-06-06)
+
+### Compiler
+
+- **Relative path resolution for imports** — `../shared/types.suede` from nested files (e.g. `pipeline/intake.suede`) now resolves correctly in both filesystem and browser paths. Previously only `./` imports worked.
+- **`compileWithFiles` accepts optional `currentFile` parameter** — enables correct `../` resolution when compiling from a file map.
+
+## v0.1.3 (2026-06-06)
+
+### Examples
+
+- All examples restructured into subdirectories with `main.suede` entry points.
+- Shared `config.suede` at `examples/` root — removed per-example init blocks.
+- All examples updated to use `const` for immutable bindings, `main()` blocks as entry points.
+- Custom model aliases (`creative`, `thorough`, `deep`) replaced with `fast`/`smart` from shared config.
+
+### Docs
+
+- README updated: hero example uses `const` and `main()`, new `const` vs `let` section, all code examples updated.
+- LANGUAGE.md updated: `const`/`let` section, all examples use `const` by default, init block references `config.suede`, variadic `concat` documented.
+
 ## v0.1.2 (2026-06-06)
 
 ### Language

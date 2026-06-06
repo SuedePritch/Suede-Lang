@@ -58,10 +58,10 @@ export function compile(src, basePath) {
 }
 
 // Browser-friendly compile: resolves imports from a Map of filename → source.
-export function compileWithFiles(src, files) {
+export function compileWithFiles(src, files, currentFile) {
   const prog = parse(lex(src));
   if (prog.imports?.length && files) {
-    resolveImportsFromMap(prog, files, new Set());
+    resolveImportsFromMap(prog, files, new Set(), currentFile || "");
   }
   // look for config.suede in the file map
   if (!prog.init && files) {
@@ -86,9 +86,24 @@ export function compileWithFiles(src, files) {
   return prog;
 }
 
-function resolveImportsFromMap(prog, files, seen) {
+function resolveRelativePath(from, importPath) {
+  // resolve importPath relative to the directory of 'from'
+  const fromParts = from.split("/");
+  fromParts.pop(); // remove filename, keep directory
+  const impParts = importPath.replace(/^\.\//, "").split("/");
+  const resolved = [...fromParts];
+  for (const part of impParts) {
+    if (part === "..") resolved.pop();
+    else if (part !== ".") resolved.push(part);
+  }
+  return resolved.join("/");
+}
+
+function resolveImportsFromMap(prog, files, seen, currentFile) {
+  currentFile = currentFile || "";
   for (const imp of prog.imports) {
-    const path = imp.path.replace(/^\.\//, "");
+    // resolve path relative to current file's directory
+    const path = currentFile ? resolveRelativePath(currentFile, imp.path) : imp.path.replace(/^\.\//, "");
     if (seen.has(path)) continue;
     seen.add(path);
 
@@ -100,7 +115,7 @@ function resolveImportsFromMap(prog, files, seen) {
     }
 
     const dep = parse(lex(src));
-    if (dep.imports?.length) resolveImportsFromMap(dep, files, seen);
+    if (dep.imports?.length) resolveImportsFromMap(dep, files, seen, path);
 
     // always merge types, errors, and init — they're project-global
     if (dep.types) {
