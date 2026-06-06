@@ -11,17 +11,16 @@ type Lead {
   note: obj
 }
 
-pipeline triage(raw: text) -> Lead {
-  let domain  = raw |> after("@") |> before(" ")        # free
-  let details ~= extract(raw, fields: [name, budget])   # costs tokens
+main(raw: text) -> Lead {
+  const domain = raw |> after("@") |> before(" ")       # free
+  const details ~= extract(raw, fields: [name, budget])  # costs tokens
 
   if details.budget > 15000 {
-    let priority = "hot"
-    let note ~= compress(raw, max: 60)
-    return @Lead { domain, priority, note }
+    const note ~= compress(raw, max: 60)
+    return @Lead { domain, priority: "hot", note }
   } else {
-    let priority ~= classify(raw, into: [warm, cold])
-    return @Lead { domain, priority, note }
+    const priority ~= classify(raw, into: [warm, cold])
+    return @Lead { domain, priority, note: null }
   }
 }
 ```
@@ -79,8 +78,8 @@ The `main` block is the default entry point. If a file has one, `suede run` uses
 
 ```suede
 main(raw: text) -> Lead {
-  let domain  = raw |> after("@") |> before(" ")
-  let details ~= extract(raw, fields: [name, budget])
+  const domain = raw |> after("@") |> before(" ")
+  const details ~= extract(raw, fields: [name, budget])
   return @Lead { domain, priority: "new", details }
 }
 ```
@@ -192,6 +191,31 @@ A pre-built browser bundle is included at `dist/suede.browser.js`. It exposes `w
 
 The interpreter enforces this both ways. You cannot use `=` on a model verb, and you cannot use `~=` on a plain function.
 
+## `const` vs `let`
+
+- `const` — immutable binding. Stays local to the current block. Use for values that shouldn't change.
+- `let` — mutable binding. Propagates changes back to the outer scope from `for` loops and `if/else` blocks.
+
+```suede
+# const for values you compute once
+const domain = raw |> after("@") |> before(" ")
+const details ~= extract(raw, fields: [name, budget])
+
+# let for accumulators and state that changes
+let total = 0
+for n in nums {
+  let total = total + n    # updates outer total
+}
+
+# let for conditional updates
+let status = "pending"
+if score > 0.8 {
+  let status = "approved"
+}
+```
+
+Rule of thumb: use `const` by default, `let` when you need to accumulate or conditionally update.
+
 ## Model verbs
 
 Six built-in verbs that require `~=`:
@@ -221,7 +245,7 @@ type Analysis {
 }
 
 pipeline analyze(text: text) -> Analysis {
-  let result ~= extract(text, fields: [mood, score, tags])
+  const result ~= extract(text, fields: [mood, score, tags])
   return @Analysis { mood: result.mood, score: result.score, tags: result.tags }
 }
 ```
@@ -248,11 +272,11 @@ error ApiFailed {
 }
 
 pipeline fetch_data(url: text) -> obj {
-  let res = fetch(url)
+  const res = fetch(url)
   if res.status != 200 {
     throw ApiFailed("request failed", status: res.status, url: url)
   }
-  let data ~= extract(res.body, fields: [name, value]) with fast
+  const data ~= extract(res.body, fields: [name, value]) with fast
   return data
 }
 
@@ -269,14 +293,15 @@ Built-in runtime errors are also catchable: `TimedOut`, `BudgetExceeded`, `Agent
 
 ## Language features
 
+- **`const` / `let`** — `const` is immutable and block-local, `let` is mutable and propagates out of loops and conditionals
 - **Types** — schema declarations with runtime enforcement on records, params, and returns
 - **Errors** — typed error definitions with `throw`/`catch`, static enforcement of error handling, built-in runtime errors (`TimedOut`, `BudgetExceeded`, `AgentMaxIterations`, `RateLimited`)
 - **Pipelines** — linear processing, top to bottom, returns a value
 - **Agents** — goal-seeking loops with tools (including other agents), memory, and max iteration caps
 - **Custom prompts** — define your own model verbs with typed returns
 - **Functions** — free helper functions, no model calls
-- **config.suede** — project-wide init block, auto-discovered by walking up the directory tree
-- **main block** — default entry point, runs automatically with `suede run`
+- **`config.suede`** — project-wide init block, auto-discovered by walking up the directory tree
+- **`main` block** — default entry point, runs automatically with `suede run`
 - **Multi-file imports** — selective or namespace imports with cycle detection
 - **Control flow** — `if`/`else`, `for`/`in`/`into`/`emit`, `match`/`case`, `try`/`catch`, `throw`, `recurse`
 - **Parallel** — `parallel { }` for concurrent model calls, `parallel for` for concurrent loop iterations

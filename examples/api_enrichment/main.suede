@@ -1,18 +1,6 @@
 # Fetch leads from an API, extract structured data, classify priority.
 # Shows the full I/O -> model -> throw/catch loop.
 
-init {
-  api_keys {
-    anthropic = env("ANTHROPIC_API_KEY")
-  }
-
-  model fast = "claude-haiku-4-5-20251001" {
-    provider = "anthropic"
-    temperature = 0.2
-    max_tokens = 256
-  }
-}
-
 error ApiFailed {
   status: num
   url: text
@@ -32,15 +20,15 @@ type Result {
 
 # fetch and enrich a single lead — throws on API failure
 pipeline enrich_lead(api_url: text, token: text) -> EnrichedLead {
-  let res = fetch(api_url, auth: "Bearer ${token}")
+  const res = fetch(api_url, auth: "Bearer ${token}")
 
   if res.status != 200 {
     throw ApiFailed("API returned ${res.status}", status: res.status, url: api_url)
   }
 
-  let info ~= extract(res.body, fields: [name, company, budget, notes]) with fast
-  let priority ~= classify(info.notes, into: [hot, warm, cold]) with fast
-  let summary ~= compress(info.notes, max: 80) with fast
+  const info ~= extract(res.body, fields: [name, company, budget, notes]) with fast
+  const priority ~= classify(info.notes, into: [hot, warm, cold]) with fast
+  const summary ~= compress(info.notes, max: 80) with fast
 
   return @EnrichedLead {
     name: info.name,
@@ -51,9 +39,9 @@ pipeline enrich_lead(api_url: text, token: text) -> EnrichedLead {
 }
 
 # caller handles the error — the checker enforces this
-pipeline process_lead(api_url: text, token: text) -> Result {
+main(api_url: text, token: text) -> Result {
   try {
-    let lead = enrich_lead(api_url, token)
+    const lead = enrich_lead(api_url, token)
     return @Result { lead, error: null }
   } catch ApiFailed as err {
     log "API failed for ${err.url}: status ${err.status}"

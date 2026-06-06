@@ -1,0 +1,33 @@
+main(message: text) -> obj {
+  const email = message |> after("from ") |> before(" ")
+  const is_urgent = message |> lower() |> contains("urgent")
+
+  const info ~= extract(message, fields: [issue, product, severity]) with fast
+
+  if is_urgent {
+    const diagnosis ~= expand(message, max: 200) with smart
+    const action ~= generate(diagnosis, format: [steps, eta, escalation]) with smart
+    return @Ticket {
+      email, priority: "p0",
+      issue: info.issue, product: info.product,
+      diagnosis, action
+    }
+  } else {
+    if info.severity == "low" {
+      const reply ~= compress(message, max: 80) with fast
+      return @Ticket {
+        email, priority: "p3",
+        issue: info.issue, product: info.product,
+        reply
+      }
+    } else {
+      const team ~= classify(message, into: [billing, engineering, product]) with fast
+      const summary ~= compress(message, max: 120) with fast
+      return @Ticket {
+        email, priority: "p2",
+        issue: info.issue, product: info.product,
+        team, summary
+      }
+    }
+  }
+}

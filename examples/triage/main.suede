@@ -1,0 +1,25 @@
+type Lead {
+  domain: text
+  priority: text
+  note: obj
+}
+
+main(raw: text) -> Lead {
+  # plain code. free, deterministic, no model. note: no ~
+  const domain = raw |> after("@") |> before(" ")
+
+  # an LLM call. marked with ~= so its cost is visible at a glance.
+  const details ~= extract(raw, fields: [name, company, budget]) with fast
+
+  # branching on a number is an if-statement, not a model call.
+  if details.budget > 15000 {
+    const priority = "hot"
+    const note ~= compress(raw, max: 60, preserve: [budget, timeline]) with smart
+    return @Lead { domain, priority, note }
+  } else {
+    # only the ambiguous case spends a model call to classify.
+    const priority ~= classify(raw, into: [warm, cold]) with fast
+    const note ~= compress(raw, max: 40) with fast
+    return @Lead { domain, priority, note }
+  }
+}

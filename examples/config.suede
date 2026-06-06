@@ -1,0 +1,22 @@
+init {
+  api_keys {
+    gemini = env("GEMINI_API_KEY")
+  }
+
+  model fast = "gemini-3.5-flash" {
+    provider = "gemini"
+    temperature = 0.2
+    max_tokens = 2048
+  }
+
+  model smart = "gemini-3.1-pro-preview" {
+    provider = "gemini"
+    temperature = 0.5
+    max_tokens = 4096
+  }
+
+  budget {
+    max_tokens = 100000
+    on_exceed = "stop"
+  }
+}

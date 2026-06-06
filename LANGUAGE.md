@@ -14,28 +14,73 @@ Every binding in Suede uses one of two assignment operators:
 The interpreter enforces this both ways: you cannot use `=` on a model verb, and you cannot use `~=` on a plain function.
 
 ```suede
-let domain = raw |> after("@")          # free
-let details ~= extract(raw, fields: [name])  # costs tokens
+const domain = raw |> after("@")                    # free
+const details ~= extract(raw, fields: [name])        # costs tokens
 ```
+
+### `const` vs `let`
+
+- `const` — **immutable**, block-local. The variable cannot be reassigned after its first binding.
+- `let` — **mutable**, propagates out of `for` loops and `if/else` blocks. Use when you need to accumulate or conditionally update a value.
+
+**Use `const` by default. Reach for `let` only when a variable needs to change.**
+
+Accumulator pattern with `let`:
+
+```suede
+pipeline tally(items: list) -> num {
+  let total = 0
+  for item in items {
+    let total = total + item.score   # mutates across iterations
+  }
+  return total
+}
+```
+
+Conditional update with `let`:
+
+```suede
+pipeline route(score: num) -> text {
+  let label = "low"
+  if score > 0.8 {
+    let label = "high"
+  } else if score > 0.5 {
+    let label = "medium"
+  }
+  return label   # label propagates out of the if/else
+}
+```
+
+Immutable bindings with `const`:
+
+```suede
+pipeline process(raw: text) -> obj {
+  const domain = raw |> after("@")                          # never changes
+  const details ~= extract(raw, fields: [name, email])      # bound once
+  return @Result { domain, details }
+}
+```
+
+Rule of thumb: if a variable is assigned once and never reassigned, it should be `const`.
 
 ### All Model Responses Are JSON
 
 Every `~=` call returns a JSON object — never a bare string or number. Access fields explicitly:
 
 ```suede
-let category ~= classify(text, into: [bug, feature])
+const category ~= classify(text, into: [bug, feature])
 # category is { label: "bug" }, not "bug"
 if category.label == "bug" { ... }
 
-let summary ~= compress(text, max: 100)
+const summary ~= compress(text, max: 100)
 # summary is { text: "short version" }, not "short version"
 log summary.text
 
-let info ~= extract(text, fields: [name, age])
+const info ~= extract(text, fields: [name, age])
 # info is { name: "Alice", age: 30 }
 log info.name
 
-let reply ~= generate(text, format: [greeting, body])
+const reply ~= generate(text, format: [greeting, body])
 # reply is { greeting: "Hi", body: "..." }
 log reply.greeting
 ```
@@ -52,7 +97,7 @@ type Analysis {
 }
 
 pipeline analyze(text: text) -> Analysis {
-  let result ~= extract(text, fields: [mood, score, tags])
+  const result ~= extract(text, fields: [mood, score, tags])
   return @Analysis {
     mood: result.mood,
     score: result.score,
@@ -134,7 +179,7 @@ Catch blocks match by error type. Multiple typed catches stack top-to-bottom, fi
 
 ```suede
 try {
-  let result = find(query)
+  const result = find(query)
   return result
 } catch NotFound as err {
   # err.message = "user not found", err.query = search_term
@@ -162,7 +207,7 @@ Four runtime conditions are thrown as typed errors, catchable in Suede code:
 ```suede
 pipeline go(text: text) -> obj {
   try {
-    let result = risky_agent(text)
+    const result = risky_agent(text)
     return result
   } catch AgentMaxIterations as err {
     return @Partial { agent: err.agent, note: "gave up after ${err.max} iterations" }
@@ -184,40 +229,9 @@ A catch-all `catch err` silences all warnings for that try block.
 
 ## Init Block
 
-Configures API keys, models, rate limits, caching, and budgets. Each model declares its own provider, so you can mix providers in a single program.
+Global configuration lives in `config.suede`. The runtime auto-discovers it by walking up directories from the entry file — you never import it explicitly. It configures API keys, models, rate limits, caching, and budgets.
 
-```suede
-init {
-  api_keys {
-    gemini = env("GEMINI_API_KEY")
-    anthropic = env("ANTHROPIC_API_KEY")
-  }
-
-  system = "You are a helpful assistant"   # default system prompt for all ~= calls
-
-  model fast = "gemini-3.5-flash" {
-    provider = "gemini"
-    temperature = 0.2
-    max_tokens = 256
-  }
-
-  model smart = "claude-sonnet-4-6" {
-    provider = "anthropic"
-    temperature = 0.7
-    max_tokens = 4096
-  }
-
-  cache {                   # model call caching
-    enabled = true
-    ttl = 3600
-  }
-
-  budget {                  # cost cap per run
-    max_tokens = 100000
-    on_exceed = "stop"      # or "warn"
-  }
-}
-```
+See `config.suede` in your project root. Each model declares its own provider, so you can mix providers in a single program.
 
 **Multi-provider:** each model block has a `provider` field (`"gemini"`, `"anthropic"`, or `"openai"`). Keys are declared once in `api_keys`, matched by provider name. Models on different providers get independent rate limiting queues.
 
@@ -233,7 +247,22 @@ import { triage_lead, score } from "./triage.suede"
 import helpers from "./helpers.suede"
 ```
 
-Imports are resolved recursively with cycle detection. Imported items (pipelines, agents, functions, prompts, types) merge into the current program.
+Imports are resolved recursively with cycle detection. Imported items (pipelines, agents, functions, prompts, types, errors, and init config) merge into the current program.
+
+## Main Block
+
+`main` is the default entry point used automatically by `suede run`. Define it when your program is meant to be run directly rather than imported as a library.
+
+```suede
+main(params) -> obj {
+  const result = process(params.input)
+  return result
+}
+```
+
+`suede run ./pipeline.suede` looks for `main` first. If found, it calls `main` with the CLI params. If not found, it errors unless you specify an entry with `--entry`.
+
+`main` follows the same rules as a pipeline: typed parameters, typed return, full access to all bindings in the file.
 
 ## Pipelines
 
@@ -246,8 +275,8 @@ type Result {
 }
 
 pipeline process(input: text, max_len: num = 100, style: text = "formal") -> Result {
-  let info ~= extract(input, fields: [name, email]) with fast
-  let summary ~= compress(input, max: max_len) with fast
+  const info ~= extract(input, fields: [name, email]) with fast
+  const summary ~= compress(input, max: max_len) with fast
   return @Result { info, summary }
 }
 ```
@@ -255,9 +284,9 @@ pipeline process(input: text, max_len: num = 100, style: text = "formal") -> Res
 Callers can omit args that have defaults:
 
 ```suede
-let result = process(raw_text)                      # max_len=100, style="formal"
-let result = process(raw_text, 200)                 # style="formal"
-let result = process(raw_text, 200, "casual")       # all explicit
+const result = process(raw_text)                      # max_len=100, style="formal"
+const result = process(raw_text, 200)                 # style="formal"
+const result = process(raw_text, 200, "casual")       # all explicit
 ```
 
 Default values work on pipelines, agents, functions, and custom prompts.
@@ -284,11 +313,11 @@ agent support_bot(ticket: text) -> Resolution max 8 {
   }
 
   loop {
-    let attempts = attempts + 1
-    let plan ~= generate(ticket, format: [thought, action]) with smart
-    let result = use("search_kb", plan.action)
-    let context = concat(context, result)
-    let status ~= classify(result, into: [resolved, stuck]) with fast
+    let attempts = attempts + 1                                              # mutates across iterations
+    const plan ~= generate(ticket, format: [thought, action]) with smart
+    const result = use("search_kb", plan.action)
+    let context = concat(context, result)                                    # accumulates across iterations
+    const status ~= classify(result, into: [resolved, stuck]) with fast
 
     if status.label == "resolved" {
       return @Resolution { answer: result, attempts }
@@ -306,6 +335,7 @@ agent support_bot(ticket: text) -> Resolution max 8 {
 - `use(tool_name, args...)` dispatches to a declared tool
 - Tools resolve to: functions, pipelines, agents in the same program, or host-provided implementations
 - If max iterations hit without return, throws `AgentMaxIterations` (catchable with `try/catch`)
+- Agent memory variables use `let` since they mutate across iterations
 
 ### Agents as Tools
 
@@ -314,7 +344,7 @@ An agent can declare another agent as a tool:
 ```suede
 agent researcher(topic: text) -> obj max 5 {
   loop {
-    let summary ~= compress(topic, max: 100)
+    const summary ~= compress(topic, max: 100)
     return @Result { answer: summary.text }
   }
 }
@@ -324,7 +354,7 @@ agent coordinator(question: text) -> obj max 3 {
     researcher(topic: text) -> obj
   }
   loop {
-    let result = use("researcher", question)
+    const result = use("researcher", question)
     return @Answer { result }
   }
 }
@@ -344,25 +374,25 @@ Six built-in verbs that require `~=`. All return JSON objects.
 | `generate` | Create new content from a prompt | `{ field: value, ... }`    |
 
 ```suede
-let info ~= extract(message, fields: [name, email, issue]) with fast
+const info ~= extract(message, fields: [name, email, issue]) with fast
 log info.name                          # "Alice"
 
-let category ~= classify(message, into: [bug, feature, question]) with fast
+const category ~= classify(message, into: [bug, feature, question]) with fast
 log category.label                     # "bug"
 
-let summary ~= compress(message, max: 100) with fast
+const summary ~= compress(message, max: 100) with fast
 log summary.text                       # "short version"
 
-let summary ~= compress(message, max: 100, preserve: [budget, timeline]) with fast
+const summary ~= compress(message, max: 100, preserve: [budget, timeline]) with fast
 # preserve: ensures these details survive the compression
 
-let formal ~= rewrite(message, style: "professional") with smart
+const formal ~= rewrite(message, style: "professional") with smart
 log formal.text                        # "rewritten text"
 
-let detail ~= expand(summary.text, max: 500) with smart
+const detail ~= expand(summary.text, max: 500) with smart
 log detail.text                        # "expanded text"
 
-let reply ~= generate(summary.text, format: [greeting, solution, closing]) with smart
+const reply ~= generate(summary.text, format: [greeting, solution, closing]) with smart
 log reply.greeting                     # "Hello"
 ```
 
@@ -371,7 +401,7 @@ log reply.greeting                     # "Hello"
 Modifiers chain after the model verb call:
 
 ```suede
-let x ~= extract(text, fields: [name, age]) with fast retry 3 cache timeout 5000
+const x ~= extract(text, fields: [name, age]) with fast retry 3 cache timeout 5000
   system "Extract precisely, no extra fields"
   expect { name: text, age: num }
   guard { x.name != "" and x.age > 0 }
@@ -392,25 +422,21 @@ let x ~= extract(text, fields: [name, age]) with fast retry 3 cache timeout 5000
 **`timeout`** works with `retry` — if a call times out, it counts as a failure and triggers the next retry attempt:
 
 ```suede
-let x ~= compress(text, max: 100) with slow retry 2 timeout 3000
+const x ~= compress(text, max: 100) with slow retry 2 timeout 3000
 # if the call takes > 3 seconds, retry up to 2 times
 ```
 
 ### System Prompts
 
-Set a default system prompt in the init block. Override per-call with `system`.
+Set a default system prompt in `config.suede`. Override per-call with `system`.
 
 ```suede
-init {
-  system = "You are a precise data extraction engine"
-}
-
 pipeline go(text: text) -> obj {
-  # uses the init-level system prompt
-  let info ~= extract(text, fields: [name]) with fast
+  # uses the config.suede-level system prompt
+  const info ~= extract(text, fields: [name]) with fast
 
   # overrides with a per-call system prompt
-  let summary ~= compress(text, max: 100) with fast
+  const summary ~= compress(text, max: 100) with fast
     system "Summarize in a formal academic tone"
 
   return @Result { info, summary }
@@ -422,7 +448,7 @@ pipeline go(text: text) -> obj {
 Guard validates the *meaning* of model output, not just its shape. If the guard expression returns false, the call retries (up to the `retry` count). The result is bound to the variable name inside the guard expression.
 
 ```suede
-let info ~= extract(text, fields: [name, email]) with fast retry 3
+const info ~= extract(text, fields: [name, email]) with fast retry 3
   guard { has(info, "name") and info.name != "" }
 ```
 
@@ -446,9 +472,9 @@ prompt analyze_tone(text: text) -> obj {
 }
 
 pipeline review(doc: text) -> obj {
-  let quality ~= score(doc, criteria: ["clarity", "depth"])
-  let spam ~= is_spam(doc)
-  let tone ~= analyze_tone(doc)
+  const quality ~= score(doc, criteria: ["clarity", "depth"])
+  const spam ~= is_spam(doc)
+  const tone ~= analyze_tone(doc)
   return @Review { quality, spam, tone }
 }
 ```
@@ -479,11 +505,11 @@ if score > 0.8 and not is_flagged {
 Pattern matching for clean multi-way branching. Compares the expression against each case using `==`. Falls through to `else` if no case matches.
 
 ```suede
-let action ~= classify(input, into: [search, escalate, close])
+const action ~= classify(input, into: [search, escalate, close])
 
 match action.label {
   case "search" {
-    let results = use("search_kb", input)
+    const results = use("search_kb", input)
     return results
   }
   case "escalate" {
@@ -520,7 +546,7 @@ for item in items {
 
 # collecting loop
 for item in items into summaries {
-  let s ~= compress(item, max: 50) with fast
+  const s ~= compress(item, max: 50) with fast
   emit s
 }
 return summaries
@@ -532,7 +558,7 @@ Run all loop iterations concurrently. Same as `for`, just add `parallel` in fron
 
 ```suede
 parallel for resume in resumes into results {
-  let candidate = screen_one(resume, job)
+  const candidate = screen_one(resume, job)
   emit candidate
 }
 ```
@@ -545,22 +571,22 @@ Two forms — field pluck with a string, or function/pipeline call per item:
 
 ```suede
 # pluck a field from each item
-let names = map(items, "name")
+const names = map(items, "name")
 
 # call a function on each item
 function double(n: num) -> num {
   return n * 2
 }
-let doubled = map(nums, double())
+const doubled = map(nums, double())
 
 # call a pipeline on each item
-let processed = map(items, process())
+const processed = map(items, process())
 
 # pass extra args to the function
 function scale(n: num, factor: num) -> num {
   return n * factor
 }
-let scaled = map(nums, scale(10))
+const scaled = map(nums, scale(10))
 ```
 
 The two forms are syntactically distinct: a string literal always plucks a field, a function call always invokes per item with the item as the first argument.
@@ -569,9 +595,9 @@ The two forms are syntactically distinct: a string literal always plucks a field
 
 ```suede
 parallel {
-  let summary ~= compress(text, max: 100) with fast
-  let sentiment ~= classify(text, into: [positive, negative]) with fast
-  let entities ~= extract(text, fields: [people, places]) with fast
+  const summary ~= compress(text, max: 100) with fast
+  const sentiment ~= classify(text, into: [positive, negative]) with fast
+  const entities ~= extract(text, fields: [people, places]) with fast
 }
 ```
 
@@ -581,7 +607,7 @@ Supports typed catches (match a specific error type) and untyped catch-all. See 
 
 ```suede
 try {
-  let result ~= extract(text, fields: [name]) with fast retry 2
+  const result ~= extract(text, fields: [name]) with fast retry 2
   return result
 } catch TimedOut as err {
   return @Fallback { error: "timed out after ${err.timeout}ms" }
@@ -597,10 +623,10 @@ pipeline summarize(chunks: list) -> text {
   if len(chunks) <= 1 {
     return chunks |> join(", ")
   } else {
-    let half = len(chunks) / 2
-    let left = recurse(slice(chunks, 0, half))
-    let right = recurse(slice(chunks, half, len(chunks)))
-    let merged ~= compress(concat(left, right), max: 200) with fast
+    const half = len(chunks) / 2
+    const left = recurse(slice(chunks, 0, half))
+    const right = recurse(slice(chunks, half, len(chunks)))
+    const merged ~= compress(concat(left, right), max: 200) with fast
     return merged
   }
 }
@@ -614,11 +640,11 @@ Parser enforces: must be inside `if` (base case required), arg count must match.
 
 ```suede
 pipeline fetch_and_analyze(url: text) -> obj {
-  let html = js {
+  const html = js {
     const res = await fetch(url);
     return await res.text();
   }
-  let summary ~= compress(html, max: 200) with fast
+  const summary ~= compress(html, max: 200) with fast
   return summary
 }
 ```
@@ -630,13 +656,13 @@ The block runs as an async function. Use `return` to pass a value back to Suede.
 ### Pipe Operator `|>`
 
 ```suede
-let domain = raw |> after("@") |> before(" ") |> lower()
+const domain = raw |> after("@") |> before(" ") |> lower()
 ```
 
 ### String Interpolation
 
 ```suede
-let greeting = "Hello ${name}, your ticket is ${ticket.id}"
+const greeting = "Hello ${name}, your ticket is ${ticket.id}"
 ```
 
 ### Record Literals
@@ -686,7 +712,7 @@ return @Lead { domain, priority, note }
 | `len(list)`                    | Length                                   |
 | `slice(list, start, end)`      | Sublist                                  |
 | `join(list, sep)`              | Join into string                         |
-| `concat(a, b)`                 | Concatenate                              |
+| `concat(a, b, ...)`            | Concatenate two or more lists/strings    |
 | `filter_in(list, allowed)`     | Keep matching                            |
 | `first(list)` / `last(list)`   | First/last element                       |
 | `unique(list)`                 | Deduplicate                              |
@@ -722,9 +748,9 @@ return @Lead { domain, priority, note }
 | `filter_lte(list, key, value)` | Keep items where `item[key] <= value` |
 
 ```suede
-let hot_leads = filter_gte(leads, "score", 8)
-let cold_leads = filter_lt(leads, "score", 3)
-let bugs = filter(tickets, "type", "bug")
+const hot_leads = filter_gte(leads, "score", 8)
+const cold_leads = filter_lt(leads, "score", 3)
+const bugs = filter(tickets, "type", "bug")
 ```
 
 ### Parsing
@@ -754,43 +780,43 @@ These are free (`=`), async under the hood, but feel synchronous in Suede.
 `fetch` returns an object with `status` (number) and `body` (text). Branch on status before using the body:
 
 ```suede
-let res = fetch("https://api.example.com/leads")
+const res = fetch("https://api.example.com/leads")
 if res.status != 200 {
   throw "API returned ${res.status}"
 }
-let parsed ~= extract(res.body, fields: [name, budget])
+const parsed ~= extract(res.body, fields: [name, budget])
 ```
 
 POST with a string body:
 
 ```suede
-let res = fetch("https://api.example.com/submit", method: "POST", body: payload)
+const res = fetch("https://api.example.com/submit", method: "POST", body: payload)
 ```
 
 Object bodies are auto-serialized as JSON with `Content-Type: application/json`:
 
 ```suede
-let data = js { return { name: "Alice", amount: 5000 } }
-let res = fetch("https://api.example.com/leads", method: "POST", body: data)
+const data = js { return { name: "Alice", amount: 5000 } }
+const res = fetch("https://api.example.com/leads", method: "POST", body: data)
 ```
 
 Auth shorthand sets the `Authorization` header:
 
 ```suede
-let key = env("API_KEY")
-let res = fetch("https://api.example.com/data", auth: "Bearer ${key}")
+const key = env("API_KEY")
+const res = fetch("https://api.example.com/data", auth: "Bearer ${key}")
 ```
 
 Read a config file:
 
 ```suede
-let rules = read("./rules.json")
+const rules = read("./rules.json")
 ```
 
 Read an environment variable:
 
 ```suede
-let key = env("OPENAI_API_KEY")
+const key = env("OPENAI_API_KEY")
 ```
 
 ### Debugging
@@ -821,12 +847,14 @@ Pipeline authors never see 429 errors — the runtime queues, throttles, and ret
 Opt-in per `~=` call with the `cache` keyword:
 
 ```suede
-let summary ~= compress(text, max: 100) with fast cache
+const summary ~= compress(text, max: 100) with fast cache
 ```
 
-Same input + verb + model → cached result. Configured in init with TTL.
+Same input + verb + model → cached result. Configured in `config.suede` with TTL.
 
 ## Cost Budgets
+
+Configured in `config.suede`:
 
 ```suede
 init {
@@ -855,12 +883,12 @@ const { value, stats } = await run(
 // with all options — last arg is an options object
 const { value, stats } = await run(
   src,
-  "agent_name",
+  "agent_name",      // or null to use the main block
   args,
   modelFn,
   onStepCallback,
   {
-    basePath: "./",           // for resolving imports
+    basePath: "./",           // base directory for config.suede discovery and import resolution
     tools: {                  // host-provided tool implementations
       search_kb: async (query) => {
         /* ... */

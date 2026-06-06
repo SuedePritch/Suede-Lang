@@ -4,24 +4,6 @@
 # Three pipelines, each can throw different errors. The top-level
 # pipeline catches everything and returns a structured result.
 
-init {
-  api_keys {
-    gemini = env("GEMINI_API_KEY")
-  }
-
-  model fast = "gemini-3.5-flash" {
-    provider = "gemini"
-    temperature = 0.2
-    max_tokens = 256
-  }
-
-  model smart = "gemini-2.5-pro-preview-06-05" {
-    provider = "gemini"
-    temperature = 0.5
-    max_tokens = 1024
-  }
-}
-
 # ── error types ──────────────────────────────────────────────────────
 
 error InvalidOrder {
@@ -63,7 +45,7 @@ type Result {
 # parses and validates the raw order text. throws InvalidOrder on bad input.
 
 pipeline validate_order(raw: text) -> Order {
-  let info ~= extract(raw, fields: [customer, product, quantity, price]) with fast
+  const info ~= extract(raw, fields: [customer, product, quantity, price]) with fast
 
   if info.customer == "" {
     throw InvalidOrder("missing customer name", field: "customer")
@@ -72,7 +54,7 @@ pipeline validate_order(raw: text) -> Order {
     throw InvalidOrder("quantity must be positive", field: "quantity")
   }
 
-  let total = info.quantity * info.price
+  const total = info.quantity * info.price
   return @Order {
     customer: info.customer,
     product: info.product,
@@ -85,13 +67,13 @@ pipeline validate_order(raw: text) -> Order {
 # checks stock levels. throws OutOfStock if we can't fulfill.
 
 pipeline check_inventory(order: Order) -> Order {
-  let res = fetch("https://api.example.com/inventory/${order.product}")
+  const res = fetch("https://api.example.com/inventory/${order.product}")
 
   if res.status != 200 {
     throw "inventory API unreachable"
   }
 
-  let stock ~= extract(res.body, fields: [available]) with fast
+  const stock ~= extract(res.body, fields: [available]) with fast
   if stock.available < order.quantity {
     throw OutOfStock(
       "${order.product} only has ${stock.available} units",
@@ -107,14 +89,14 @@ pipeline check_inventory(order: Order) -> Order {
 # processes payment. throws PaymentFailed on decline.
 
 pipeline charge(order: Order) -> obj {
-  let res = fetch("https://api.example.com/charge", method: "POST", body: to_json(order))
+  const res = fetch("https://api.example.com/charge", method: "POST", body: to_json(order))
 
   if res.status != 200 {
-    let detail ~= extract(res.body, fields: [reason]) with fast
+    const detail ~= extract(res.body, fields: [reason]) with fast
     throw PaymentFailed(detail.reason, reason: detail.reason, amount: order.total)
   }
 
-  let confirmation ~= extract(res.body, fields: [id, timestamp]) with fast
+  const confirmation ~= extract(res.body, fields: [id, timestamp]) with fast
   return confirmation
 }
 
@@ -122,13 +104,13 @@ pipeline charge(order: Order) -> obj {
 # ties it all together. each sub-pipeline can throw, and the checker
 # would warn if we didn't catch them here.
 
-pipeline process_order(raw: text) -> Result {
+main(raw: text) -> Result {
   try {
-    let order = validate_order(raw)
-    let checked = check_inventory(order)
-    let confirmation = charge(checked)
+    const order = validate_order(raw)
+    const checked = check_inventory(order)
+    const confirmation = charge(checked)
 
-    let summary ~= compress(raw, max: 60) with fast
+    const summary ~= compress(raw, max: 60) with fast
 
     return @Result {
       receipt: @Receipt {
@@ -148,7 +130,7 @@ pipeline process_order(raw: text) -> Result {
     }
   } catch OutOfStock as err {
     # can't fulfill — suggest alternatives
-    let suggestion ~= generate(err.product, format: [alternative, reason]) with smart
+    const suggestion ~= generate(err.product, format: [alternative, reason]) with smart
     return @Result {
       receipt: null,
       error: "${err.message}. Try: ${suggestion.alternative}",

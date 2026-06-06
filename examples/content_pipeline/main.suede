@@ -1,0 +1,39 @@
+type Article {
+  title: any
+  author: any
+  type: obj
+  body: obj
+  summary: obj
+}
+
+main(raw: text) -> Article {
+  # extract metadata — cheap
+  const meta ~= extract(raw, fields: [title, author, topic, word_count]) with fast
+
+  # classify the content type to decide how to handle it
+  const content_type ~= classify(raw, into: [news, opinion, tutorial, review]) with fast
+
+  if content_type.label == "tutorial" {
+    # tutorials get expanded with more detail
+    const expanded ~= expand(raw, max: 2000) with smart
+    const summary ~= compress(expanded, max: 200) with fast
+    return @Article {
+      title: meta.title,
+      author: meta.author,
+      type: content_type,
+      body: expanded,
+      summary
+    }
+  } else {
+    # everything else gets compressed and rewritten
+    const body ~= rewrite(raw, style: "professional") with smart
+    const summary ~= compress(body, max: 140) with fast
+    return @Article {
+      title: meta.title,
+      author: meta.author,
+      type: content_type,
+      body,
+      summary
+    }
+  }
+}
