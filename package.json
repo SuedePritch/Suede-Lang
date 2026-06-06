@@ -1,6 +1,6 @@
 {
   "name": "suede-lang",
-  "version": "0.1.1",
+  "version": "0.1.2",
   "description": "A language for AI workflows where cost is visible in the syntax",
   "license": "MIT",
   "author": "James Pritchard",
